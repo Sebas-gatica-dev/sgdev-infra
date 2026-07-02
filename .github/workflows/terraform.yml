@@ -1,0 +1,61 @@
+name: Terraform gateway
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Terraform action to run
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+  push:
+    branches:
+      - main
+    paths:
+      - terraform/**
+      - .github/workflows/terraform.yml
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    env:
+      TF_IN_AUTOMATION: true
+      TF_INPUT: false
+      TF_VAR_vps_host: ${{ secrets.SGDEV_VPS_HOST || '143.95.217.87' }}
+      TF_VAR_ssh_port: ${{ secrets.SGDEV_SSH_PORT || '22022' }}
+      TF_VAR_ssh_user: ${{ secrets.SGDEV_SSH_USER || 'root' }}
+      TF_VAR_ssh_private_key: ${{ secrets.SGDEV_SSH_PRIVATE_KEY }}
+      TF_VAR_vps_password: ${{ secrets.SGDEV_VPS_PASSWORD }}
+      TF_VAR_domain: ${{ secrets.SGDEV_DOMAIN || 'sgdev.com.ar' }}
+      TF_VAR_infra_repo_url: ${{ secrets.SGDEV_INFRA_REPO_URL }}
+      TF_VAR_portfolio_repo_url: ${{ secrets.SGDEV_PORTFOLIO_REPO_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.7
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        run: terraform plan -out=tfplan
+
+      - name: Terraform apply
+        if: github.event_name == 'workflow_dispatch' && inputs.action == 'apply' && github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve tfplan

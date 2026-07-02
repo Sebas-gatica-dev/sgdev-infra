@@ -1,0 +1,26 @@
+.env
+.env.*
+!.env.example
+*.log
+__pycache__/
+*.py[cod]
+
+# Local runtime state
+proxy/nginx/app-locations/*.conf
+proxy/nginx/certs/
+proxy/nginx/acme/
+tmp/
+
+# Terraform local state and secrets
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/terraform.tfvars
+terraform/*.auto.tfvars
+!terraform/terraform.tfvars.example
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

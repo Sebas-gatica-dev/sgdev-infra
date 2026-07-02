@@ -1,0 +1,57 @@
+name: sgdev-portfolio
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sg_medical_appointments_demo}
+      POSTGRES_USER: ${POSTGRES_USER:-portfolio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-portfolio} -d ${POSTGRES_DB:-sg_medical_appointments_demo}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - data
+
+  app:
+    build:
+      context: .
+    container_name: sgdev-portfolio-app
+    restart: unless-stopped
+    environment:
+      PORT: 8787
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      OPENAI_VOICE_MODEL: ${OPENAI_VOICE_MODEL:-gpt-4o-mini-transcribe}
+      OPENAI_CONVERSATION_MODEL: ${OPENAI_CONVERSATION_MODEL:-gpt-realtime-mini}
+      PORTFOLIO_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-sg_medical_appointments_demo}
+      PORTFOLIO_DB_USER: ${POSTGRES_USER:-portfolio}
+      PORTFOLIO_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      PORTFOLIO_CORS_ALLOWED_ORIGIN_PATTERNS: ${PUBLIC_APP_URL:-http://localhost}*
+      PUBLIC_BASE_URL: ${PUBLIC_APP_URL:-}
+    expose:
+      - "8787"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      proxy:
+        aliases:
+          - sgdev-portfolio-app
+      data:
+
+volumes:
+  postgres_data:
+
+networks:
+  proxy:
+    external: true
+    name: sgdev-proxy
+  data:
+    internal: true
+

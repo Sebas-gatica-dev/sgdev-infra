@@ -1,0 +1,19 @@
+vps_host = "143.95.217.87"
+ssh_port = 22022
+ssh_user = "root"
+domain   = "sgdev.com.ar"
+
+# Use the Git URL of this gateway repository after pushing it to GitHub.
+infra_repo_url = "git@github.com:OWNER/Sgdev-infra.git"
+infra_branch   = "main"
+
+# Enable when the portfolio repository is already pushed and has a deployable .env on the VPS.
+configure_portfolio = false
+portfolio_repo_url  = "git@github.com:OWNER/sg-ai-agent-portfolio.git"
+portfolio_branch    = "main"
+portfolio_path      = "/portfolio"
+
+# Set secrets outside this file:
+# export TF_VAR_ssh_private_key="$(cat ~/.ssh/sgdev_deploy)"
+# or, only as a fallback:
+# export TF_VAR_vps_password="..."

@@ -1,0 +1,24 @@
+# Optional Docker Compose override for using JanoAI behind the shared proxy.
+# Requires a recent Docker Compose v2 with support for !reset.
+#
+# Run from the JanoAI repo:
+# docker compose --env-file .env.production -f compose.prod.yml -f /opt/sgdev-infra/examples/project-compose/janoai.compose.proxy.override.yml up -d --build
+
+services:
+  nginx:
+    container_name: janoai-nginx
+    ports: !reset []
+    expose:
+      - "80"
+    networks:
+      edge:
+      app:
+      sgdev-proxy:
+        aliases:
+          - janoai-nginx
+
+networks:
+  sgdev-proxy:
+    external: true
+    name: sgdev-proxy
+

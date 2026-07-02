@@ -1,0 +1,31 @@
+# Optional Docker Compose override for using EgregorAI behind the shared proxy.
+# Requires a recent Docker Compose v2 with support for !reset.
+
+services:
+  egregor-web:
+    ports: !reset []
+    expose:
+      - "80"
+    networks:
+      default:
+      sgdev-proxy:
+        aliases:
+          - egregor-web
+
+  egregor-api:
+    ports: !reset []
+
+  egregor-web-research:
+    ports: !reset []
+
+  egregor-local-ai:
+    ports: !reset []
+
+  egregor-db:
+    ports: !reset []
+
+networks:
+  sgdev-proxy:
+    external: true
+    name: sgdev-proxy
+

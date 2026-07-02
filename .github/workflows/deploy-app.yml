@@ -1,0 +1,49 @@
+name: Deploy app
+
+on:
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: App slug configured in /etc/sgdev-infra/apps/<slug>.env
+        required: true
+        default: portfolio
+      no_pull:
+        description: Deploy without git pull
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SGDEV_SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SGDEV_VPS_HOST }}
+          SSH_PORT: ${{ secrets.SGDEV_SSH_PORT || '22022' }}
+        run: |
+          set -eu
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/sgdev_deploy
+          chmod 600 ~/.ssh/sgdev_deploy
+          ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy on VPS
+        env:
+          SSH_HOST: ${{ secrets.SGDEV_VPS_HOST }}
+          SSH_PORT: ${{ secrets.SGDEV_SSH_PORT || '22022' }}
+          SSH_USER: ${{ secrets.SGDEV_SSH_USER || 'root' }}
+          SLUG: ${{ inputs.slug }}
+          NO_PULL: ${{ inputs.no_pull }}
+        run: |
+          set -eu
+          extra=""
+          if [ "$NO_PULL" = "true" ]; then
+            extra="--no-pull"
+          fi
+          ssh -i ~/.ssh/sgdev_deploy -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            "cd /opt/sgdev-infra && ./scripts/app-deploy.sh '$SLUG' $extra"
