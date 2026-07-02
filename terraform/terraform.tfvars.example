@@ -12,7 +12,7 @@ configure_portfolio = false
 portfolio_repo_url  = "git@github.com:OWNER/sg-ai-agent-portfolio.git"
 portfolio_branch    = "main"
 portfolio_path      = "/portfolio"
-portfolio_upstream  = "http://host.docker.internal:18080"
+portfolio_upstream  = "http://portfolio-nginx:80"
 
 # Set secrets outside this file:
 # export TF_VAR_ssh_private_key="$(cat ~/.ssh/sgdev_deploy)"

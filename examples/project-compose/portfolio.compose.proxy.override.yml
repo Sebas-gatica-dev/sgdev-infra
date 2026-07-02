@@ -1,0 +1,12 @@
+services:
+  nginx:
+    networks:
+      default:
+      proxy:
+        aliases:
+          - portfolio-nginx
+
+networks:
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:-sgdev-proxy}
