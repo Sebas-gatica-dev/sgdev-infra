@@ -65,7 +65,7 @@ La config que Terraform genera para el gateway usa:
 ```text
 APP_SLUG=portfolio
 APP_PATH=/portfolio
-APP_UPSTREAM=http://portfolio-nginx:80
+APP_UPSTREAM=http://host.docker.internal:18080
 STRIP_PREFIX=false
 ```
 

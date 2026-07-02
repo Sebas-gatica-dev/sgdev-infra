@@ -90,7 +90,7 @@ variable "portfolio_path" {
 }
 
 variable "portfolio_upstream" {
-  description = "Docker-network upstream for the portfolio internal Nginx."
+  description = "Gateway upstream for the portfolio internal Nginx."
   type        = string
-  default     = "http://portfolio-nginx:80"
+  default     = "http://host.docker.internal:18080"
 }
