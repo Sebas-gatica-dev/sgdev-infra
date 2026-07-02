@@ -55,6 +55,12 @@ log "Deploying $APP_SLUG with Docker Compose"
 # shellcheck disable=SC2086
 docker compose $compose_args up -d --build
 
+if docker compose $compose_args config --services | grep -qx 'nginx'; then
+  log "Restarting app nginx so upstream container DNS is fresh"
+  # shellcheck disable=SC2086
+  docker compose $compose_args restart nginx
+fi
+
 "$SCRIPT_DIR/app-render-nginx.sh" "$APP_SLUG"
 
 if docker compose -f "$PROXY_COMPOSE_FILE" ps --status running | grep -q 'sgdev-proxy-nginx'; then
@@ -64,4 +70,3 @@ else
 fi
 
 log "Done: $APP_PATH/"
-
