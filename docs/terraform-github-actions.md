@@ -1,6 +1,6 @@
 # Terraform y GitHub Actions
 
-Este repo puede administrar el gateway `sgdev.com.ar` en la VPS `143.95.217.87`.
+Este repo administra el gateway `sgdev.com.ar` en la VPS `143.95.217.87`.
 
 ## Flujo recomendado
 
@@ -22,8 +22,8 @@ SGDEV_VPS_HOST=143.95.217.87
 SGDEV_SSH_PORT=22022
 SGDEV_SSH_USER=root
 SGDEV_DOMAIN=sgdev.com.ar
-SGDEV_INFRA_REPO_URL=git@github.com:OWNER/Sgdev-infra.git
-SGDEV_PORTFOLIO_REPO_URL=git@github.com:OWNER/sg-ai-agent-portfolio.git
+SGDEV_INFRA_REPO_URL=https://github.com/Sebas-gatica-dev/sgdev-infra.git
+SGDEV_PORTFOLIO_REPO_URL=https://github.com/Sebas-gatica-dev/sgdev-porfolio.git
 SGDEV_SSH_PRIVATE_KEY=<private key PEM>
 ```
 
@@ -72,10 +72,24 @@ STRIP_PREFIX=false
 Con eso el gateway recibe `https://sgdev.com.ar/portfolio/...` y la app conserva
 el prefijo `/portfolio`.
 
-## Datos que faltan para automatizar al 100%
+## HTTPS
 
-- URL final del repo GitHub de `Sgdev-infra`.
-- URL final del repo GitHub del portfolio.
-- SSH key de deploy instalada en la VPS y en GitHub Secrets.
-- Confirmar si vas a mantener path routing (`/portfolio`, `/egregorai`) o pasar
-  a subdominios más adelante.
+HTTPS se instala con:
+
+```bash
+sudo ./scripts/install-https.sh sebasdeveloperlife@gmail.com sgdev.com.ar www.sgdev.com.ar
+```
+
+El script usa Let's Encrypt, escribe `proxy/nginx/conf.d/ssl.conf` como archivo
+generado local y deja renovacion automatica por cron.
+
+## Pendiente para automatizar desde GitHub
+
+La VPS ya tiene la SSH key de deploy instalada. Para ejecutar Terraform y deploys
+desde GitHub Actions falta cargar `SGDEV_SSH_PRIVATE_KEY` en
+`Settings > Secrets and variables > Actions`. Los demas valores tienen defaults,
+pero conviene cargarlos tambien para que quede explicito.
+
+Si en el futuro mantenes path routing (`/portfolio`, `/egregorai`), cada proyecto
+puede tener su propio archivo `/etc/sgdev-infra/apps/<slug>.env` y su propia base
+PostgreSQL. Si preferis subdominios, el gateway necesitara un template por host.

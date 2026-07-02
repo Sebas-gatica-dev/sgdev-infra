@@ -39,6 +39,7 @@ variable "domain" {
 variable "infra_repo_url" {
   description = "Git URL of this gateway repo, used by the VPS to pull updates."
   type        = string
+  default     = "https://github.com/Sebas-gatica-dev/sgdev-infra.git"
 }
 
 variable "infra_branch" {
@@ -74,7 +75,7 @@ variable "configure_portfolio" {
 variable "portfolio_repo_url" {
   description = "Git URL of the portfolio repository."
   type        = string
-  default     = ""
+  default     = "https://github.com/Sebas-gatica-dev/sgdev-porfolio.git"
 }
 
 variable "portfolio_branch" {
