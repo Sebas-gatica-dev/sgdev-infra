@@ -77,6 +77,5 @@ el prefijo `/portfolio`.
 - URL final del repo GitHub de `Sgdev-infra`.
 - URL final del repo GitHub del portfolio.
 - SSH key de deploy instalada en la VPS y en GitHub Secrets.
-- Email para Let's Encrypt si queres activar HTTPS automático.
 - Confirmar si vas a mantener path routing (`/portfolio`, `/egregorai`) o pasar
   a subdominios más adelante.
