@@ -119,11 +119,25 @@ Este proyecto ya trae `docker-compose.yml` con frontend, backend, DB y un Nginx
 interno. Para publicar bajo `/portfolio`, compilar el frontend con
 `VITE_BASE_PATH=/portfolio/`.
 
+La variante actual del portfolio tambien levanta un modelo local gratuito con
+Ollama/FastAPI. No necesita publicarse al proxy compartido: queda en la red
+interna del compose del portfolio y el backend lo consume como
+`http://free-model:8795`.
+
 Configurar:
 
 ```bash
 sudo cp /opt/sgdev-infra/examples/apps/sgdev-portfolio.env.example /etc/sgdev-infra/apps/portfolio.env
 sudo nano /etc/sgdev-infra/apps/portfolio.env
+```
+
+En el `.env` runtime del repo del portfolio o en variables equivalentes del
+compose, activar:
+
+```bash
+PORTFOLIO_FREE_MODEL_ENABLED=true
+PORTFOLIO_FREE_MODEL_NAME=qwen3:0.6b
+VITE_BASE_PATH=/portfolio/
 ```
 
 Antes de subir este proyecto a GitHub, revisar que no haya claves reales en
