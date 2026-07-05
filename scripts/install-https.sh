@@ -23,11 +23,11 @@ domains=("$@")
 primary_domain="${domains[0]}"
 
 require_command docker
-require_command envsubst
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y certbot
+apt-get install -y certbot gettext-base
+require_command envsubst
 
 mkdir -p "$SGDEV_INFRA_ROOT/proxy/www/.well-known/acme-challenge"
 
@@ -50,9 +50,7 @@ certbot certonly \
 export SERVER_NAMES="${domains[*]}"
 export CERT_NAME="$primary_domain"
 
-envsubst '${SERVER_NAMES} ${CERT_NAME}' \
-  < "$SGDEV_INFRA_ROOT/proxy/nginx/templates/ssl.conf.template" \
-  > "$SGDEV_INFRA_ROOT/proxy/nginx/conf.d/ssl.conf"
+"$SCRIPT_DIR/sync-ssl-conf.sh" "${domains[@]}"
 
 "$SCRIPT_DIR/proxy-reload.sh"
 

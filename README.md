@@ -122,6 +122,7 @@ scripts/
   proxy-up.sh                  # levanta Nginx compartido
   proxy-reload.sh              # nginx -t + reload dentro del contenedor
   install-https.sh             # certbot + server block TLS
+  sync-ssl-conf.sh             # regenera ssl.conf desde la plantilla actual
   app-new.sh                   # registra app generica
   app-deploy.sh                # pull/build/up/render/reload por slug
   app-render-nginx.sh          # genera app-locations/<slug>.conf
@@ -319,7 +320,13 @@ El script:
 7. crea `/etc/cron.d/sgdev-certbot-renew`.
 
 Importante: `ssl.conf` es un artefacto generado en la VPS. Si cambia la
-plantilla TLS, volver a ejecutar `install-https.sh` para regenerarlo.
+plantilla TLS y los certificados ya existen, no hace falta pedir certificados
+otra vez:
+
+```bash
+./scripts/sync-ssl-conf.sh
+./scripts/proxy-reload.sh
+```
 
 ## Registrar una app
 
@@ -484,10 +491,31 @@ cd /opt/sgdev-infra
 git pull --ff-only
 sudo chmod +x scripts/*.sh
 sudo ./scripts/install-admin-api.sh
+./scripts/sync-ssl-conf.sh
 ./scripts/proxy-reload.sh
 sudo grep SGDEV_ADMIN_API_TOKEN /etc/sgdev-infra/admin-api.env
 systemctl status sgdev-admin-api.service
 systemctl status sgdev-admin-control-api.service
+```
+
+Si `https://sgdev.com.ar/admin/` carga pero el panel dice que el backend esta
+apagado, validar primero la ruta HTTPS del control API:
+
+```bash
+curl -i https://sgdev.com.ar/admin-api/health
+```
+
+Si responde `404`, el servicio probablemente esta vivo pero `ssl.conf` quedo
+generado con una plantilla vieja. En la VPS:
+
+```bash
+cd /opt/sgdev-infra
+git pull --ff-only origin main
+chmod +x scripts/*.sh
+sudo ./scripts/install-admin-api.sh
+./scripts/sync-ssl-conf.sh
+./scripts/proxy-reload.sh
+curl -i https://sgdev.com.ar/admin-api/health
 ```
 
 ### `sgdev-admin-api.service`
@@ -735,7 +763,8 @@ proxy/nginx/templates/ssl.conf.template
 ```
 
 Si HTTPS ya esta activo, cambiar la plantilla no alcanza: hay que regenerar
-`proxy/nginx/conf.d/ssl.conf` ejecutando `install-https.sh`.
+`proxy/nginx/conf.d/ssl.conf` con `./scripts/sync-ssl-conf.sh` y luego
+`./scripts/proxy-reload.sh`.
 
 ## Seguridad operacional
 

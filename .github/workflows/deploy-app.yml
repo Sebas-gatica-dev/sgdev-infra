@@ -58,5 +58,6 @@ jobs:
                sudo ./scripts/install-admin-api.sh
              fi
              ./scripts/proxy-up.sh
+             ./scripts/sync-ssl-conf.sh
              ./scripts/proxy-reload.sh
              ./scripts/app-deploy.sh '$SLUG' $extra"
