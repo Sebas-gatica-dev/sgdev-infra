@@ -8,6 +8,7 @@ __pycache__/
 # Local runtime state
 proxy/nginx/app-locations/*.conf
 proxy/nginx/conf.d/ssl.conf
+proxy/nginx/conf.d/ssl.conf.bak-*
 proxy/nginx/certs/
 proxy/nginx/acme/
 tmp/

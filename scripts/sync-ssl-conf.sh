@@ -56,7 +56,9 @@ fi
 
 mkdir -p "$(dirname "$target_file")"
 if [[ -f "$target_file" ]]; then
-  cp "$target_file" "$target_file.bak-$(date +%Y%m%d%H%M%S)"
+  backup_dir="$SGDEV_BACKUPS_ROOT/sgdev-infra/ssl-conf"
+  mkdir -p "$backup_dir"
+  cp "$target_file" "$backup_dir/ssl.conf.$(date +%Y%m%d%H%M%S).bak"
 fi
 mv "$tmp_file" "$target_file"
 
