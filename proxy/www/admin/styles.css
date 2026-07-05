@@ -984,14 +984,24 @@ tr:last-child td {
 
 .template-grid {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 16px;
+  min-height: clamp(440px, calc(100vh - 300px), 760px);
+}
+
+.template-grid > div:last-child {
+  display: flex;
+  min-width: 0;
 }
 
 .template-list {
   display: grid;
   align-content: start;
   gap: 8px;
+  max-height: clamp(440px, calc(100vh - 300px), 760px);
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .template-list button {
@@ -1009,6 +1019,20 @@ tr:last-child td {
   color: var(--blue);
   border-color: #c8d7ff;
   background: var(--blue-weak);
+}
+
+.template-grid .code-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: clamp(440px, calc(100vh - 300px), 760px);
+}
+
+.template-grid .code-card pre {
+  flex: 1;
+  min-height: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .toast {
@@ -1105,6 +1129,13 @@ tr:last-child td {
   .monitor-mini-grid,
   .monitor-token-form {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .template-grid,
+  .template-list,
+  .template-grid .code-card {
+    min-height: 55vh;
+    max-height: none;
   }
 
   .topbar {
