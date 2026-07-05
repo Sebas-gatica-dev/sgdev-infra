@@ -498,6 +498,14 @@ systemctl status sgdev-admin-api.service
 systemctl status sgdev-admin-control-api.service
 ```
 
+En Linux, el instalador intenta escuchar sobre la IP de `docker0`, por ejemplo
+`172.17.0.1`, para que `sgdev-proxy-nginx` pueda llegar al host con
+`host.docker.internal`. Si se necesita forzar otro bind:
+
+```bash
+sudo SGDEV_ADMIN_API_BIND_HOST=127.0.0.1 ./scripts/install-admin-api.sh
+```
+
 Si `https://sgdev.com.ar/admin/` carga pero el panel dice que el backend esta
 apagado, validar primero la ruta HTTPS del control API:
 
@@ -522,7 +530,7 @@ curl -i https://sgdev.com.ar/admin-api/health
 
 Servicio read-only:
 
-- escucha en `127.0.0.1:9100`;
+- escucha en `SGDEV_ADMIN_API_HOST:9100`;
 - ejecuta `admin/monitor_api.py`;
 - token en `/etc/sgdev-infra/admin-api.env`;
 - endpoint principal: `GET /v1/snapshot`;
@@ -532,14 +540,15 @@ Servicio read-only:
 Prueba local en la VPS:
 
 ```bash
-curl -H "X-SGDEV-Admin-Token: TOKEN" http://127.0.0.1:9100/v1/snapshot
+admin_host="$(grep '^SGDEV_ADMIN_API_HOST=' /etc/sgdev-infra/admin-api.env | cut -d= -f2-)"
+curl -H "X-SGDEV-Admin-Token: TOKEN" "http://$admin_host:9100/v1/snapshot"
 ```
 
 ### `sgdev-admin-control-api.service`
 
 Servicio de control:
 
-- escucha en `127.0.0.1:9101`;
+- escucha en `SGDEV_ADMIN_API_HOST:9101`;
 - ejecuta `admin_api.py`;
 - token en `/etc/sgdev-infra/admin-control-api.env`;
 - soporta modo `local` en la VPS y modo `ssh` para desarrollo local;
@@ -569,11 +578,12 @@ Acciones permitidas por `POST /actions`:
 Autenticacion:
 
 ```bash
-curl -H "Authorization: Bearer TOKEN" http://127.0.0.1:9101/state
+admin_host="$(grep '^SGDEV_ADMIN_API_HOST=' /etc/sgdev-infra/admin-control-api.env | cut -d= -f2-)"
+curl -H "Authorization: Bearer TOKEN" "http://$admin_host:9101/state"
 curl -H "Authorization: Bearer TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"action":"status","slug":"miapp"}' \
-  http://127.0.0.1:9101/actions
+  "http://$admin_host:9101/actions"
 ```
 
 ## CI/CD

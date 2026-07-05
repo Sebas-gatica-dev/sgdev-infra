@@ -354,11 +354,14 @@
         "cd /opt/sgdev-infra",
         "sudo chmod +x scripts/*.sh",
         "sudo ./scripts/install-admin-api.sh",
+        "./scripts/sync-ssl-conf.sh",
         "./scripts/proxy-reload.sh",
         "systemctl status sgdev-admin-control-api.service",
         "",
-        "# El admin usa /admin-api/ -> 127.0.0.1:9101",
-        "curl -H \"Authorization: Bearer TOKEN\" http://127.0.0.1:9101/state",
+        "# El admin usa /admin-api/ -> host.docker.internal:9101",
+        "# En Linux el servicio suele bindear sobre docker0, por ejemplo 172.17.0.1",
+        "curl -i https://sgdev.com.ar/admin-api/health",
+        "curl -H \"Authorization: Bearer TOKEN\" https://sgdev.com.ar/admin-api/state",
         "",
         "# En local: puente por SSH hacia la VPS",
         "# .env.admin.local queda fuera de Git",
@@ -1155,7 +1158,7 @@
         '<div><span>Disco</span><strong>' + (disk ? formatBytes(disk.available_bytes) + " libre" : "sin dato") + "</strong></div>",
         '<div><span>Docker</span><strong>' + (snapshot.docker.available ? snapshot.docker.running + "/" + snapshot.docker.total : "sin acceso") + "</strong></div>",
         '<div><span>Lectura</span><strong>' + escapeHtml(formatTimestamp(snapshot.generated_at)) + "</strong></div>"
-      ].join("") + "</div>" : '<div class="monitor-empty"><span>' + icons.shield + '</span><div><strong>Conecta el API local para ver datos reales.</strong><p>Nginx debe poder hablar con sgdev-admin-control-api en 127.0.0.1:9101.</p></div></div>',
+      ].join("") + "</div>" : '<div class="monitor-empty"><span>' + icons.shield + '</span><div><strong>Conecta el API local para ver datos reales.</strong><p>Nginx debe poder hablar con sgdev-admin-control-api en host.docker.internal:9101.</p></div></div>',
       "</section>"
     ].join("");
   }

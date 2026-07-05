@@ -25,13 +25,42 @@ PY
   fi
 }
 
+detect_admin_bind_host() {
+  if [[ -n "${SGDEV_ADMIN_API_BIND_HOST:-}" ]]; then
+    printf '%s\n' "$SGDEV_ADMIN_API_BIND_HOST"
+    return
+  fi
+
+  if command -v ip >/dev/null 2>&1 && ip -4 addr show docker0 >/dev/null 2>&1; then
+    ip -4 addr show docker0 \
+      | awk '/inet / { sub(/\/.*/, "", $2); print $2; exit }'
+    return
+  fi
+
+  printf '127.0.0.1\n'
+}
+
+set_env_value() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+
+  if grep -qE "^${key}=" "$file"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$file"
+  fi
+}
+
 log "Installing SGDEV admin monitor API as user: $service_user"
 mkdir -p "$SGDEV_CONFIG_DIR" /var/log/sgdev-infra
+admin_bind_host="$(detect_admin_bind_host)"
+[[ -n "$admin_bind_host" ]] || admin_bind_host="127.0.0.1"
 
 if [[ ! -f "$env_file" ]]; then
   token="$(generate_token)"
   cat > "$env_file" <<EOF
-SGDEV_ADMIN_API_HOST=127.0.0.1
+SGDEV_ADMIN_API_HOST=$admin_bind_host
 SGDEV_ADMIN_API_PORT=9100
 SGDEV_ADMIN_API_TOKEN=$token
 SGDEV_INFRA_ROOT=$SGDEV_INFRA_ROOT
@@ -47,6 +76,7 @@ else
   token="$(grep -E '^SGDEV_ADMIN_API_TOKEN=' "$env_file" | tail -n 1 | cut -d= -f2- || true)"
   [[ -n "$token" ]] || token="$(generate_token)"
 fi
+set_env_value "$env_file" "SGDEV_ADMIN_API_HOST" "$admin_bind_host"
 
 chown "$service_user":"$service_user" "$env_file" || true
 chmod 600 "$env_file" || true
@@ -54,7 +84,7 @@ chown "$service_user":"$service_user" /var/log/sgdev-infra || true
 
 if [[ ! -f "$control_env_file" ]]; then
   cat > "$control_env_file" <<EOF
-SGDEV_ADMIN_API_HOST=127.0.0.1
+SGDEV_ADMIN_API_HOST=$admin_bind_host
 SGDEV_ADMIN_API_PORT=9101
 SGDEV_ADMIN_API_MODE=local
 SGDEV_ADMIN_TOKEN=$token
@@ -67,6 +97,7 @@ EOF
 else
   log "Keeping existing $control_env_file"
 fi
+set_env_value "$control_env_file" "SGDEV_ADMIN_API_HOST" "$admin_bind_host"
 
 chown "$service_user":"$service_user" "$control_env_file" || true
 chmod 600 "$control_env_file" || true
@@ -132,8 +163,8 @@ systemctl daemon-reload
 systemctl enable sgdev-admin-control-api.service
 systemctl restart sgdev-admin-control-api.service
 
-log "Admin monitor API installed on 127.0.0.1:9100"
-log "Admin control API installed on 127.0.0.1:9101"
+log "Admin monitor API installed on $admin_bind_host:9100"
+log "Admin control API installed on $admin_bind_host:9101"
 log "API token is stored in $env_file and $control_env_file"
 systemctl --no-pager --full status sgdev-admin-api.service || true
 systemctl --no-pager --full status sgdev-admin-control-api.service || true
