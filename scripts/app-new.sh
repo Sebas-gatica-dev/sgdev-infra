@@ -41,9 +41,15 @@ BRANCH=main
 STRIP_PREFIX=true
 CLIENT_MAX_BODY_SIZE=25m
 PROXY_READ_TIMEOUT=120s
+
+# Optional database Excel export/import.
+# DB_EXCEL_ENGINE=postgres
+# DB_EXCEL_SERVICE=db
+# DB_EXCEL_DATABASE=app
+# DB_EXCEL_USER=app
+# DB_EXCEL_APP_ID_COLUMN=app_id
 EOF
 
 log "Created $config_file"
 "$SCRIPT_DIR/app-render-nginx.sh" "$slug"
 log "Review the config, then run: ./scripts/app-deploy.sh $slug"
-

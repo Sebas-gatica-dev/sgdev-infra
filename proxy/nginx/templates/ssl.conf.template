@@ -18,8 +18,44 @@ server {
         return 200 "ok\n";
     }
 
+    location = /admin {
+        absolute_redirect off;
+        return 302 /admin/login/;
+    }
+
+    location = /admin/api {
+        absolute_redirect off;
+        return 308 /admin/api/;
+    }
+
+    location ^~ /admin/api/ {
+        proxy_pass http://host.docker.internal:9100/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        client_max_body_size 256k;
+        proxy_read_timeout 10s;
+    }
+
+    location ^~ /admin/ {
+        try_files $uri $uri/ /admin/index.html;
+    }
+
+    location ^~ /admin-api/ {
+        proxy_pass http://host.docker.internal:9101/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        client_max_body_size 2m;
+        proxy_read_timeout 600s;
+    }
+
     location = / {
-        try_files /index.html =404;
+        return 302 /portfolio/;
     }
 
     location ^~ /__deploy/github/ {

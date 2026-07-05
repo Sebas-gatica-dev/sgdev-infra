@@ -46,4 +46,17 @@ jobs:
             extra="--no-pull"
           fi
           ssh -i ~/.ssh/sgdev_deploy -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
-            "cd /opt/sgdev-infra && ./scripts/app-deploy.sh '$SLUG' $extra"
+            "set -eu
+             cd /opt/sgdev-infra
+             git fetch origin main
+             git checkout main
+             git pull --ff-only origin main
+             chmod +x scripts/*.sh
+             if [ \"\$(id -u)\" -eq 0 ]; then
+               ./scripts/install-admin-api.sh
+             else
+               sudo ./scripts/install-admin-api.sh
+             fi
+             ./scripts/proxy-up.sh
+             ./scripts/proxy-reload.sh
+             ./scripts/app-deploy.sh '$SLUG' $extra"
