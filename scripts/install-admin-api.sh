@@ -13,6 +13,7 @@ service_user="${1:-${SUDO_USER:-root}}"
 
 env_file="$SGDEV_CONFIG_DIR/admin-api.env"
 control_env_file="$SGDEV_CONFIG_DIR/admin-control-api.env"
+portfolio_app_env_file="$SGDEV_APPS_CONFIG_DIR/portfolio.env"
 
 generate_token() {
   if command -v openssl >/dev/null 2>&1; then
@@ -103,6 +104,12 @@ set_env_value "$control_env_file" "SGDEV_ADMIN_API_HOST" "$admin_bind_host"
 set_env_value "$control_env_file" "SGDEV_PORTFOLIO_API_BASE_URL" "https://${SGDEV_PRIMARY_DOMAIN:-sgdev.com.ar}/portfolio/api"
 if ! grep -q '^SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN=' "$control_env_file" 2>/dev/null; then
   set_env_value "$control_env_file" "SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN" "$token"
+fi
+portfolio_usage_token="$(grep -E '^SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN=' "$control_env_file" | tail -n 1 | cut -d= -f2- || true)"
+if [[ -f "$portfolio_app_env_file" && -n "$portfolio_usage_token" ]] \
+  && ! grep -q '^PORTFOLIO_USAGE_ADMIN_TOKEN=' "$portfolio_app_env_file" 2>/dev/null; then
+  set_env_value "$portfolio_app_env_file" "PORTFOLIO_USAGE_ADMIN_TOKEN" "$portfolio_usage_token"
+  log "Added PORTFOLIO_USAGE_ADMIN_TOKEN to $portfolio_app_env_file"
 fi
 
 chown "$service_user":"$service_user" "$control_env_file" || true
