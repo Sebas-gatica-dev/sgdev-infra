@@ -205,6 +205,16 @@ PROXY_SEND_TIMEOUT=120s
 BACKUP_DIR=/opt/backups/miapp
 ```
 
+Durante deploy, `app-deploy.sh` pasa dos archivos a Docker Compose en este orden:
+
+```text
+/etc/sgdev-infra/apps/<slug>.env
+<REPO_DIR>/<ENV_FILE>
+```
+
+El archivo de app define defaults operativos compartidos con la infra; el `.env` del repo puede
+sobrescribir secretos o valores runtime especificos del proyecto.
+
 ### Contrato Docker Compose de una app
 
 Un proyecto compatible debe cumplir:
@@ -560,7 +570,11 @@ Endpoints:
 GET  /health
 GET  /state
 GET  /logs?slug=<slug>&service=<service>&tail=200
+GET  /db/export?slug=<slug>
+GET  /portfolio/usage
 POST /actions
+POST /apps
+POST /portfolio/usage/grant
 ```
 
 Acciones permitidas por `POST /actions`:
@@ -570,9 +584,26 @@ Acciones permitidas por `POST /actions`:
 {"action":"deploy-local","slug":"miapp"}
 {"action":"status","slug":"miapp"}
 {"action":"backup","slug":"miapp"}
+{"action":"db-export","slug":"miapp"}
 {"action":"stop","slug":"miapp"}
 {"action":"remove","slug":"miapp"}
 {"action":"remove-stop","slug":"miapp"}
+```
+
+El panel de tokens del portfolio llama al control API, y el control API llama al backend del
+portfolio con:
+
+```text
+SGDEV_PORTFOLIO_API_BASE_URL=https://sgdev.com.ar/portfolio/api
+SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN=<mismo valor que PORTFOLIO_USAGE_ADMIN_TOKEN>
+```
+
+Las rutas externas que deben seguir respondiendo en el portfolio son:
+
+```text
+GET  /portfolio/api/admin/usage/ips
+POST /portfolio/api/admin/usage/grant
+GET  /portfolio/api/portfolio/health
 ```
 
 Autenticacion:

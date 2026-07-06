@@ -33,7 +33,11 @@ flowchart LR
     end
 
     subgraph P["/opt/apps/portfolio/repo"]
-      PA --> PP["PostgreSQL"]
+      PA --> PF["React/Vite frontend"]
+      PA --> PB["Spring Boot backend"]
+      PB --> PP["PostgreSQL"]
+      PB --> PQ["FastAPI free model"]
+      PQ --> PO["Ollama / Qwen"]
     end
 ```
 
@@ -73,9 +77,15 @@ registradas.
 
 `sgdev-admin-control-api.service` escucha en `127.0.0.1:9101`, exige el mismo
 token y ejecuta solo una lista cerrada de acciones: deploy, rebuild sin pull,
-status, backup, stop y remove por slug. En desarrollo local, `admin_api.py`
-puede correr en modo SSH contra la VPS usando `.env.admin.local`; en la VPS
-corre en modo `local` desde systemd.
+status, backup, stop, remove, alta guiada, export DB Excel y administracion de
+tokens OpenAI del portfolio. En desarrollo local, `admin_api.py` puede correr
+en modo SSH contra la VPS usando `.env.admin.local`; en la VPS corre en modo
+`local` desde systemd.
+
+Para tokens del portfolio, el control API usa
+`SGDEV_PORTFOLIO_API_BASE_URL=https://sgdev.com.ar/portfolio/api` y llama al
+backend por las rutas estables `/admin/usage/ips` y `/admin/usage/grant`.
+El refactor interno del portfolio por dominios Java no cambia ese contrato HTTP.
 
 ## Por que Nginx manual
 

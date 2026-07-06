@@ -29,6 +29,23 @@
     message: "",
     updatedAt: ""
   };
+  var appCreateState = {
+    open: false,
+    running: false,
+    error: "",
+    output: ""
+  };
+  var dbExportState = {
+    running: false,
+    slug: "",
+    error: ""
+  };
+  var portfolioUsageState = {
+    loading: false,
+    items: [],
+    error: "",
+    granting: false
+  };
 
   var icons = {
     dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 13h8V3H3v10zM13 21h8v-8h-8v8zM13 3v8h8V3h-8zM3 21h8v-6H3v6z"/></svg>',
@@ -42,6 +59,7 @@
     help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 1 1 5.2 2c-.9.8-1.8 1.3-2 2.8"/><path d="M12 17h.01"/></svg>',
     play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
     stop: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v10H7z"/></svg>',
+    close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>',
     trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15"/></svg>',
     copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
     shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6l-8-3z"/><path d="m9 12 2 2 4-5"/></svg>',
@@ -60,6 +78,7 @@
     ["logs", "Logs", icons.logs],
     ["metrics", "Monitoreo", icons.chart],
     ["database", "Base de datos", icons.database],
+    ["tokens", "Tokens IA", icons.bolt],
     ["domains", "Dominios", icons.domain],
     ["cicd", "CI/CD", icons.cicd],
     ["help", "Ayuda", icons.help]
@@ -171,6 +190,34 @@
         "DB_EXCEL_DATABASE=app",
         "DB_EXCEL_USER=app",
         "DB_EXCEL_APP_ID_COLUMN=app_id"
+      ].join("\\n")
+    },
+    appCreate: {
+      title: "Alta guiada de app",
+      body: [
+        "Apps es inventario y alta. CI/CD es operacion sobre una app ya registrada.",
+        "",
+        "Datos minimos:",
+        "1. Nombre visible.",
+        "2. Slug estable.",
+        "3. Repo Git.",
+        "4. Branch.",
+        "5. Dominio.",
+        "6. Ruta publica.",
+        "7. Upstream interno.",
+        "8. Compose files.",
+        "9. Env file.",
+        "",
+        "Datos recomendados:",
+        "10. APP_ID para filtrar datos.",
+        "11. Volumenes o paths de backup.",
+        "12. Servicio, engine, base y usuario DB si habra Excel.",
+        "13. Body maximo y timeouts si la app sube archivos o responde lento.",
+        "",
+        "Despues del alta:",
+        "./scripts/app-deploy.sh <slug>",
+        "./scripts/app-logs.sh <slug>",
+        "curl -I https://<dominio>/<ruta>/"
       ].join("\\n")
     },
     compose: {
@@ -400,7 +447,7 @@
 
   var helpGroups = [
     { id: "operate", label: "Operación", keys: ["checklist", "deployStepByStep", "operations", "adminApi"] },
-    { id: "apps", label: "Apps Docker", keys: ["env", "compose", "dockerfile", "nginx"] },
+    { id: "apps", label: "Apps Docker", keys: ["appCreate", "env", "compose", "dockerfile", "nginx"] },
     { id: "wordpress", label: "WordPress", keys: ["wordpress"] },
     { id: "database", label: "Base de datos", keys: ["db"] },
     { id: "cicd", label: "CI/CD", keys: ["github"] },
@@ -522,7 +569,7 @@
       headers: authHeaders({ "Accept": "application/json" })
     }, options || {}));
     var payload = await response.json().catch(function () { return {}; });
-    if (!response.ok || payload.ok === false) {
+    if (!response.ok) {
       throw new Error(payload.error || ("HTTP " + response.status));
     }
     return payload;
@@ -690,6 +737,216 @@
       render();
       throw error;
     }
+  }
+
+  async function createRemoteApp(payload) {
+    appCreateState.running = true;
+    appCreateState.error = "";
+    appCreateState.output = "";
+    actionState = {
+      running: true,
+      action: "create-app",
+      slug: payload.slug,
+      status: "running",
+      message: "Creando carpetas, config y ruta en la VPS...",
+      updatedAt: nowStamp()
+    };
+    render();
+    try {
+      var result = await apiRequest("/apps", {
+        method: "POST",
+        headers: authHeaders({
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        }),
+        body: JSON.stringify(payload)
+      });
+      var ok = result.ok !== false && result.exitCode === 0;
+      appCreateState.running = false;
+      appCreateState.output = [result.stdout || "", result.stderr || ""].filter(Boolean).join("\n").trim();
+      actionState = {
+        running: false,
+        action: "create-app",
+        slug: payload.slug,
+        status: ok ? "ok" : "warn",
+        message: ok ? "Alta creada. Revisa la app y ejecuta Deploy." : "El alta termino con error.",
+        updatedAt: nowStamp()
+      };
+      state.operations.unshift({
+        app: payload.slug,
+        action: "create-app",
+        status: ok ? "ok" : "warn",
+        at: nowStamp(),
+        command: result.command || "./scripts/app-new.sh " + payload.slug
+      });
+      state.operations = state.operations.slice(0, 12);
+      saveState();
+      if (ok) {
+        appCreateState.open = false;
+        toast("App creada en la VPS");
+        await syncRemoteState(true);
+      } else {
+        appCreateState.error = appCreateState.output || "El comando remoto devolvio error.";
+        render();
+      }
+    } catch (error) {
+      appCreateState.running = false;
+      appCreateState.error = error.message || String(error);
+      actionState = {
+        running: false,
+        action: "create-app",
+        slug: payload.slug,
+        status: "error",
+        message: appCreateState.error,
+        updatedAt: nowStamp()
+      };
+      render();
+    }
+  }
+
+  async function downloadDatabaseExport(item) {
+    if (!item || dbExportState.running) return;
+    dbExportState = { running: true, slug: item.slug, error: "" };
+    actionState = {
+      running: true,
+      action: "db-export",
+      slug: item.slug,
+      status: "running",
+      message: "Generando Excel de la base de datos...",
+      updatedAt: nowStamp()
+    };
+    render();
+    try {
+      var response = await fetch("/admin-api/db/export?slug=" + encodeURIComponent(item.slug), {
+        headers: authHeaders({ "Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
+      });
+      if (!response.ok) {
+        var text = await response.text();
+        throw new Error(text || ("HTTP " + response.status));
+      }
+      var blob = await response.blob();
+      var filename = filenameFromDisposition(response.headers.get("Content-Disposition")) || item.slug + "-db.xlsx";
+      var url = URL.createObjectURL(blob);
+      var link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      dbExportState = { running: false, slug: "", error: "" };
+      actionState = {
+        running: false,
+        action: "db-export",
+        slug: item.slug,
+        status: "ok",
+        message: "Excel descargado en este navegador.",
+        updatedAt: nowStamp()
+      };
+      state.operations.unshift({
+        app: item.slug,
+        action: "db-export",
+        status: "ok",
+        at: nowStamp(),
+        command: "./scripts/app-db-export-excel.sh " + item.slug
+      });
+      state.operations = state.operations.slice(0, 12);
+      saveState();
+      toast("Excel de datos descargado");
+      render();
+    } catch (error) {
+      dbExportState = { running: false, slug: item.slug, error: error.message || String(error) };
+      actionState = {
+        running: false,
+        action: "db-export",
+        slug: item.slug,
+        status: "error",
+        message: dbExportState.error,
+        updatedAt: nowStamp()
+      };
+      render();
+    }
+  }
+
+  async function loadPortfolioUsage(force) {
+    if (portfolioUsageState.loading) return;
+    if (!force && portfolioUsageState.items.length && !portfolioUsageState.error) return;
+    portfolioUsageState.loading = true;
+    portfolioUsageState.error = "";
+    render();
+    try {
+      var payload = await apiRequest("/portfolio/usage");
+      portfolioUsageState.items = Array.isArray(payload.items) ? payload.items : [];
+      portfolioUsageState.error = "";
+    } catch (error) {
+      portfolioUsageState.error = error.message || String(error);
+    } finally {
+      portfolioUsageState.loading = false;
+      render();
+    }
+  }
+
+  async function grantPortfolioTokens(payload) {
+    portfolioUsageState.granting = true;
+    portfolioUsageState.error = "";
+    actionState = {
+      running: true,
+      action: "grant-tokens",
+      slug: payload.clientIp || payload.ipHash,
+      status: "running",
+      message: "Acreditando tokens OpenAI...",
+      updatedAt: nowStamp()
+    };
+    render();
+    try {
+      var result = await apiRequest("/portfolio/usage/grant", {
+        method: "POST",
+        headers: authHeaders({
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        }),
+        body: JSON.stringify(payload)
+      });
+      portfolioUsageState.granting = false;
+      actionState = {
+        running: false,
+        action: "grant-tokens",
+        slug: payload.clientIp || payload.ipHash,
+        status: "ok",
+        message: "Tokens acreditados.",
+        updatedAt: nowStamp()
+      };
+      state.operations.unshift({
+        app: "portfolio",
+        action: "grant-tokens",
+        status: "ok",
+        at: nowStamp(),
+        command: "POST /admin/usage/grant"
+      });
+      state.operations = state.operations.slice(0, 12);
+      saveState();
+      toast("Tokens acreditados");
+      await loadPortfolioUsage(true);
+      return result;
+    } catch (error) {
+      portfolioUsageState.granting = false;
+      portfolioUsageState.error = error.message || String(error);
+      actionState = {
+        running: false,
+        action: "grant-tokens",
+        slug: payload.clientIp || payload.ipHash,
+        status: "error",
+        message: portfolioUsageState.error,
+        updatedAt: nowStamp()
+      };
+      render();
+      throw error;
+    }
+  }
+
+  function filenameFromDisposition(value) {
+    var match = String(value || "").match(/filename="?([^"]+)"?/i);
+    return match ? match[1] : "";
   }
 
   async function loadRemoteLogs(item) {
@@ -860,6 +1117,9 @@
     }
     if (session && isMonitorRoute(route)) requestMonitorSnapshot(false);
     if (session && route === "logs") loadRemoteLogs(activeApp());
+    if (session && route === "tokens" && !portfolioUsageState.loading && !portfolioUsageState.items.length && !portfolioUsageState.error) {
+      loadPortfolioUsage(false);
+    }
   }
 
   function renderLogin() {
@@ -902,6 +1162,7 @@
       logs: renderLogs,
       metrics: renderMetrics,
       database: renderDatabase,
+      tokens: renderPortfolioTokens,
       domains: renderDomains,
       cicd: renderCicd,
       help: renderHelp
@@ -916,6 +1177,7 @@
       renderGlobalActionBanner(),
       renderer(),
       "</main>",
+      renderAppWizard(),
       "</div>"
     ].join("");
   }
@@ -924,9 +1186,12 @@
     if (!actionState.action) return "";
     var pillClass = actionState.running ? "idle" : actionState.status === "ok" ? "running" : "stopped";
     var title = actionState.running ? "Accion en curso" : actionState.status === "ok" ? "Accion completada" : "Accion con error";
+    var logsButton = actionState.action === "grant-tokens"
+      ? ""
+      : '<button class="btn" type="button" data-open-logs="' + escapeHtml(actionState.slug) + '">' + icons.logs + " Logs</button>";
     return [
       '<section class="panel action-status-banner">',
-      '<div class="section-title"><div><h2>' + title + '</h2><p>' + escapeHtml(actionState.slug + " - " + actionState.action + " - " + actionState.message) + '</p></div><div class="btn-row"><span class="status-pill ' + pillClass + '"><span class="dot"></span>' + (actionState.running ? "Ejecutando" : actionState.status) + '</span><button class="btn" type="button" data-open-logs="' + escapeHtml(actionState.slug) + '">' + icons.logs + " Logs</button></div></div>",
+      '<div class="section-title"><div><h2>' + title + '</h2><p>' + escapeHtml(actionState.slug + " - " + actionState.action + " - " + actionState.message) + '</p></div><div class="btn-row"><span class="status-pill ' + pillClass + '"><span class="dot"></span>' + (actionState.running ? "Ejecutando" : actionState.status) + "</span>" + logsButton + "</div></div>",
       "</section>"
     ].join("");
   }
@@ -954,6 +1219,7 @@
       logs: ["Logs", "Vista de comandos y salida esperada por servicio."],
       metrics: ["Monitoreo", "CPU, memoria, disco, procesos, red y Docker de la VPS."],
       database: ["Base de datos", "Export/import Excel por proyecto."],
+      tokens: ["Tokens IA", "Cuotas OpenAI por IP y solicitudes pendientes."],
       domains: ["Dominios", "Hosts, rutas y subrutas del proxy Nginx."],
       cicd: ["CI/CD", "Deploys manuales, backups y webhooks."],
       help: ["Ayuda", "Recordatorios y plantillas para copiar."]
@@ -1093,12 +1359,11 @@
   }
 
   function renderApps() {
-    if (!state.apps.length) return emptyPanel("Inventario", "Todavia no hay apps reales cargadas desde la VPS.", "Sincronizar", "sync");
+    var createButton = '<button class="btn primary" type="button" data-open-app-wizard>' + icons.plus + " Nueva app</button>";
     return [
       '<section class="panel">',
-      '<div class="section-title"><div><h2>Inventario</h2><p>Cada app conserva slug, app_id, dominio, ruta y upstream.</p></div></div>',
-      '<div class="cards-grid">',
-      state.apps.map(function (item) {
+      '<div class="section-title"><div><h2>Inventario</h2><p>Apps registradas, rutas publicas y comandos principales.</p></div>' + createButton + "</div>",
+      state.apps.length ? '<div class="cards-grid">' + state.apps.map(function (item) {
         var disabled = actionState.running ? " disabled" : "";
         return [
           '<article class="project-card">',
@@ -1110,11 +1375,10 @@
           "<div><span>Upstream</span><strong>" + escapeHtml(item.upstream) + "</strong></div>",
           "<div><span>Compose</span><strong>" + escapeHtml(item.compose) + "</strong></div>",
           "</div>",
-          '<div class="btn-row"><button class="btn primary" type="button" data-app-action="deploy" data-slug="' + item.slug + '"' + disabled + '>' + icons.play + ' Deploy</button><button class="btn" type="button" data-open-logs="' + item.slug + '">' + icons.logs + ' Logs</button><button class="btn" type="button" data-open-database="' + item.slug + '">' + icons.database + ' Datos</button><button class="btn" type="button" data-app-action="backup" data-slug="' + item.slug + '"' + disabled + '>' + icons.backup + ' Backup</button><button class="btn red" type="button" data-app-action="remove" data-slug="' + item.slug + '"' + disabled + '>' + icons.trash + " Ruta</button></div>",
+          '<div class="btn-row app-card-actions"><button class="btn primary" type="button" data-app-action="deploy" data-slug="' + item.slug + '"' + disabled + '>' + icons.play + ' Deploy</button><button class="btn" type="button" data-open-logs="' + item.slug + '">' + icons.logs + ' Logs</button><button class="btn" type="button" data-db-export="' + item.slug + '"' + (dbExportState.running ? " disabled" : "") + '>' + icons.database + ' Datos</button><button class="btn" type="button" data-app-action="backup" data-slug="' + item.slug + '"' + disabled + '>' + icons.backup + ' Backup</button><button class="btn red" type="button" data-app-action="remove" data-slug="' + item.slug + '"' + disabled + '>' + icons.trash + " Ruta</button></div>",
           "</article>"
         ].join("");
-      }).join(""),
-      "</div>",
+      }).join("") + "</div>" : '<div class="monitor-empty"><span>' + icons.server + '</span><div><strong>No hay apps cargadas todavia.</strong><p>Sincroniza la VPS o crea una nueva app con el alta guiada.</p></div></div>',
       "</section>"
     ].join("");
   }
@@ -1320,9 +1584,9 @@
       '<div class="panel">',
       '<div class="section-title"><div><h2>Excel del proyecto</h2><p>Exporta datos para archivar y reimporta el mismo archivo cuando haga falta.</p></div>' + appSelect("dbAppSelect") + "</div>",
       '<div class="split-actions">',
-      '<div class="info-tile"><span class="action-icon green">' + icons.backup + '</span><div><strong>Exportar Excel</strong><span>Receta manual en Ayuda hasta desplegar los scripts DB en la VPS.</span></div></div>',
-      '<div class="info-tile"><span class="action-icon blue">' + icons.upload + '</span><div><strong>Importar</strong><span>Usa la receta manual de Ayuda para indicar el archivo .xlsx exacto.</span></div></div>',
-      '<div class="info-tile"><span class="action-icon amber">' + icons.refresh + '</span><div><strong>Reemplazar proyecto</strong><span>Modo controlado para refrescar filas de una app específica.</span></div></div>',
+      '<button class="action-tile" type="button" data-db-export="' + item.slug + '"' + (dbExportState.running ? " disabled" : "") + '><span class="action-icon green">' + icons.backup + '</span><div><strong>' + (dbExportState.running && dbExportState.slug === item.slug ? "Exportando..." : "Descargar Excel") + '</strong><span>Genera un .xlsx con las tablas configuradas para esta app.</span></div></button>',
+      '<div class="info-tile"><span class="action-icon blue">' + icons.upload + '</span><div><strong>Importar</strong><span>Disponible por script con ruta exacta al .xlsx en la VPS.</span></div></div>',
+      '<div class="info-tile"><span class="action-icon amber">' + icons.refresh + '</span><div><strong>Reemplazar proyecto</strong><span>Modo controlado para refrescar filas de una app especifica.</span></div></div>',
       '</div>',
       "</div>",
       '<div class="panel">',
@@ -1335,6 +1599,55 @@
       "</div>",
       "</section>"
     ].join("");
+  }
+
+  function renderPortfolioTokens() {
+    var rows = portfolioUsageState.items.map(function (item) {
+      var pending = item.requestStatus === "pending";
+      var statusClass = pending ? "idle" : item.tokensRemaining > 0 ? "running" : "stopped";
+      var lastRequest = item.lastTokenRequestAt ? formatTimestamp(item.lastTokenRequestAt) : "-";
+      var lastGrant = item.lastGrantedAt ? formatTimestamp(item.lastGrantedAt) : "-";
+      return [
+        "<tr>",
+        "<td><strong>" + escapeHtml(item.clientIp) + '</strong><div class="meta">' + escapeHtml(String(item.ipHash || "").slice(0, 12)) + "</div></td>",
+        "<td>" + escapeHtml(item.tokensUsed) + " / " + escapeHtml(item.tokenLimit) + '<div class="meta">' + escapeHtml(item.tokensRemaining) + " restantes</div></td>",
+        "<td>" + escapeHtml(formatVoiceMinutes(item.voiceSecondsUsed)) + " / " + escapeHtml(formatVoiceMinutes(item.maxVoiceSeconds)) + '<div class="meta">' + escapeHtml(formatVoiceMinutes(item.voiceSecondsRemaining)) + " restantes</div></td>",
+        '<td><span class="status-pill ' + statusClass + '"><span class="dot"></span>' + escapeHtml(requestStatusLabel(item.requestStatus)) + "</span><div class=\"meta\">Pedidos: " + escapeHtml(item.tokenRequestCount || 0) + "</div></td>",
+        "<td>" + escapeHtml(lastRequest) + '<div class="meta">Ultima carga: ' + escapeHtml(lastGrant) + "</div></td>",
+        '<td><form class="token-grant-form" data-token-grant-form><input type="hidden" name="ipHash" value="' + escapeHtml(item.ipHash) + '"><input type="hidden" name="clientIp" value="' + escapeHtml(item.clientIp) + '"><input class="input" name="tokens" type="number" min="1" step="1" value="100" aria-label="Tokens a acreditar"><input class="input" name="note" type="text" placeholder="Nota" aria-label="Nota de admin"><button class="btn primary" type="submit"' + (portfolioUsageState.granting ? " disabled" : "") + ">Acreditar</button></form></td>",
+        "</tr>"
+      ].join("");
+    }).join("");
+
+    var body = portfolioUsageState.loading
+      ? '<p class="meta">Cargando IPs registradas...</p>'
+      : portfolioUsageState.error
+        ? '<div class="form-alert error">' + escapeHtml(portfolioUsageState.error) + "</div>"
+        : rows
+          ? '<div class="table-wrap"><table><thead><tr><th>IP</th><th>Tokens</th><th>Voz</th><th>Solicitud</th><th>Fechas</th><th>Acreditar</th></tr></thead><tbody>' + rows + "</tbody></table></div>"
+          : '<p class="meta">Todavia no hay IPs registradas por el portfolio.</p>';
+
+    return [
+      '<section class="content-grid single">',
+      '<div class="panel">',
+      '<div class="section-title"><div><h2>Cuotas OpenAI por IP</h2><p>Las solicitudes llegan desde el boton del portfolio y quedan pendientes hasta acreditar tokens.</p></div><div class="btn-row"><button class="btn icon-only" type="button" title="Actualizar" aria-label="Actualizar tokens" data-refresh-portfolio-usage>' + icons.refresh + "</button></div></div>",
+      body,
+      "</div>",
+      "</section>"
+    ].join("");
+  }
+
+  function requestStatusLabel(value) {
+    if (value === "pending") return "Pendiente";
+    if (value === "granted") return "Acreditado";
+    return "Sin pedido";
+  }
+
+  function formatVoiceMinutes(seconds) {
+    var safe = Math.max(0, Number(seconds || 0));
+    var minutes = Math.floor(safe / 60);
+    var rest = safe % 60;
+    return rest ? minutes + ":" + String(rest).padStart(2, "0") + " min" : minutes + " min";
   }
 
   function renderDomains() {
@@ -1403,6 +1716,125 @@
     return '<button class="action-tile" type="button" data-app-action="' + action + '" data-slug="' + item.slug + '"' + disabled + '><span class="action-icon ' + color + '">' + icon + '</span><div><strong>' + title + '</strong><span>' + description + '</span></div></button>';
   }
 
+  function formField(label, name, value, options) {
+    options = options || {};
+    var id = options.id || "newApp" + name.charAt(0).toUpperCase() + name.slice(1);
+    var type = options.type || "text";
+    var required = options.required ? " required" : "";
+    var full = options.full ? " full" : "";
+    var placeholder = options.placeholder ? ' placeholder="' + escapeHtml(options.placeholder) + '"' : "";
+    var auto = options.auto ? ' data-new-app-derived="true"' : "";
+    var help = options.help ? '<span class="field-help">' + escapeHtml(options.help) + "</span>" : "";
+    return '<div class="field' + full + '"><label for="' + id + '">' + escapeHtml(label) + '</label><input class="input" id="' + id + '" name="' + escapeHtml(name) + '" type="' + type + '" value="' + escapeHtml(value || "") + '"' + placeholder + required + auto + ">" + help + "</div>";
+  }
+
+  function checkboxField(label, name, checked, help) {
+    return '<label class="check-field"><input type="checkbox" name="' + escapeHtml(name) + '"' + (checked ? " checked" : "") + '><span><strong>' + escapeHtml(label) + '</strong><small>' + escapeHtml(help || "") + "</small></span></label>";
+  }
+
+  function renderAppWizard() {
+    if (!appCreateState.open) return "";
+    var slug = "miapp";
+    var appsRoot = state.settings.appsRoot || "/opt/apps";
+    var domain = state.settings.controlDomain || "sgdev.com.ar";
+    var error = appCreateState.error ? '<div class="form-alert error">' + escapeHtml(appCreateState.error) + "</div>" : "";
+    var output = appCreateState.output ? '<div class="logs-console wizard-output">' + escapeHtml(appCreateState.output) + "</div>" : "";
+    return [
+      '<div class="modal-backdrop" data-close-app-wizard>',
+      '<form class="modal-panel app-wizard" id="appCreateForm" data-stop-close>',
+      '<header class="modal-header"><div><p class="eyebrow">Alta guiada</p><h2>Nueva app</h2><p>Completa los datos operativos; la VPS crea config, carpetas, ruta Nginx y opcionalmente clona el repo.</p></div><button class="btn icon-only ghost" type="button" title="Cerrar" aria-label="Cerrar" data-close-app-wizard>' + icons.close + "</button></header>",
+      error,
+      '<div class="wizard-steps">',
+      '<section class="wizard-section"><h3>Paso 1: Identidad</h3><div class="form-grid">',
+      formField("Nombre visible", "name", "", { placeholder: "Portfolio", help: "Se muestra en Apps y tableros." }),
+      formField("Slug", "slug", slug, { id: "newAppSlug", required: true, help: "Minusculas, numeros, guion o guion bajo." }),
+      formField("App ID", "appId", "app_miapp", { id: "newAppAppId", auto: true, help: "Usado para filtrar datos por proyecto." }),
+      formField("Dominio", "domain", domain, { required: true, help: "Host publico que servira la ruta." }),
+      "</div></section>",
+      '<section class="wizard-section"><h3>Paso 2: Repositorio y Compose</h3><div class="form-grid">',
+      formField("URL del repo", "repoUrl", "", { required: true, full: true, placeholder: "https://github.com/owner/app.git" }),
+      formField("Branch", "branch", "main", { required: true }),
+      formField("Repo dir", "repoDir", appsRoot + "/" + slug + "/repo", { id: "newAppRepoDir", auto: true, required: true }),
+      formField("Compose files", "composeFiles", "compose.yml", { required: true, help: "Acepta uno o varios separados por espacio." }),
+      formField("Env file", "envFile", ".env", { required: true }),
+      checkboxField("Clonar repo al crear", "cloneRepo", true, "Si el directorio esta vacio, ejecuta git clone con el branch indicado."),
+      "</div></section>",
+      '<section class="wizard-section"><h3>Paso 3: Proxy, backups y datos</h3><div class="form-grid">',
+      formField("Ruta publica", "path", "/" + slug, { id: "newAppPath", auto: true, required: true }),
+      formField("Upstream interno", "upstream", "http://" + slug + "-nginx:80", { id: "newAppUpstream", auto: true, required: true }),
+      formField("Body maximo", "clientMaxBodySize", "25m"),
+      formField("Timeout lectura", "proxyReadTimeout", "120s"),
+      formField("Backup volumenes", "backupVolumes", "", { full: true, placeholder: slug + "_postgres_data " + slug + "_uploads" }),
+      '<div class="field"><label for="newAppDbEngine">DB engine</label><select class="select" id="newAppDbEngine" name="dbEngine"><option value="">Sin DB Excel</option><option value="postgres">postgres</option><option value="mysql">mysql</option></select></div>',
+      formField("Servicio DB", "dbService", "db"),
+      formField("Base", "dbName", "app"),
+      formField("Usuario DB", "dbUser", "app"),
+      formField("Columna app_id", "dbAppIdColumn", "app_id"),
+      checkboxField("Strip prefix", "stripPrefix", true, "Convierte /miapp/... en /... antes de llegar al contenedor."),
+      "</div></section>",
+      "</div>",
+      '<div class="wizard-review"><strong>Comando base</strong><code>./scripts/app-new.sh &lt;slug&gt; &lt;repo-dir&gt; &lt;upstream&gt; &lt;ruta&gt; &lt;compose&gt; &lt;env&gt;</code></div>',
+      output,
+      '<footer class="modal-actions"><button class="btn" type="button" data-close-app-wizard' + (appCreateState.running ? " disabled" : "") + '>Cancelar</button><button class="btn primary" type="submit"' + (appCreateState.running ? " disabled" : "") + ">" + icons.plus + (appCreateState.running ? " Creando..." : " Crear app") + "</button></footer>",
+      "</form>",
+      "</div>"
+    ].join("");
+  }
+
+  function slugify(value) {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80);
+  }
+
+  function updateNewAppDerivedFields(slug) {
+    slug = slugify(slug) || "miapp";
+    var appsRoot = state.settings.appsRoot || "/opt/apps";
+    var values = {
+      newAppPath: "/" + slug,
+      newAppUpstream: "http://" + slug + "-nginx:80",
+      newAppRepoDir: appsRoot + "/" + slug + "/repo",
+      newAppAppId: "app_" + slug.replace(/-/g, "_")
+    };
+    Object.keys(values).forEach(function (id) {
+      var input = document.getElementById(id);
+      if (input && input.dataset.userEdited !== "true") input.value = values[id];
+    });
+  }
+
+  function collectCreateAppPayload(form) {
+    var data = new FormData(form);
+    var boolValue = function (name) { return data.get(name) === "on"; };
+    var dbEngine = String(data.get("dbEngine") || "").trim();
+    return {
+      name: String(data.get("name") || "").trim(),
+      slug: slugify(data.get("slug")),
+      appId: String(data.get("appId") || "").trim(),
+      repoUrl: String(data.get("repoUrl") || "").trim(),
+      branch: String(data.get("branch") || "main").trim(),
+      domain: String(data.get("domain") || "").trim(),
+      path: String(data.get("path") || "").trim(),
+      upstream: String(data.get("upstream") || "").trim(),
+      repoDir: String(data.get("repoDir") || "").trim(),
+      composeFiles: String(data.get("composeFiles") || "compose.yml").trim(),
+      envFile: String(data.get("envFile") || ".env").trim(),
+      cloneRepo: boolValue("cloneRepo"),
+      stripPrefix: boolValue("stripPrefix"),
+      clientMaxBodySize: String(data.get("clientMaxBodySize") || "25m").trim(),
+      proxyReadTimeout: String(data.get("proxyReadTimeout") || "120s").trim(),
+      backupVolumes: String(data.get("backupVolumes") || "").trim(),
+      dbEngine: dbEngine,
+      dbService: dbEngine ? String(data.get("dbService") || "").trim() : "",
+      dbName: dbEngine ? String(data.get("dbName") || "").trim() : "",
+      dbUser: dbEngine ? String(data.get("dbUser") || "").trim() : "",
+      dbAppIdColumn: dbEngine ? String(data.get("dbAppIdColumn") || "app_id").trim() : ""
+    };
+  }
+
   function renderHelp() {
     var section = helpGroups.find(function (group) { return group.id === state.ui.helpSection; }) || helpGroups[0];
     if (section.keys.indexOf(state.ui.helpTemplate) < 0) {
@@ -1469,6 +1901,25 @@
       return;
     }
 
+    var openWizardButton = event.target.closest("[data-open-app-wizard]");
+    if (openWizardButton) {
+      appCreateState.open = true;
+      appCreateState.error = "";
+      appCreateState.output = "";
+      render();
+      return;
+    }
+
+    var closeWizardButton = event.target.closest("button[data-close-app-wizard]");
+    if (closeWizardButton || event.target.classList.contains("modal-backdrop")) {
+      if (!appCreateState.running) {
+        appCreateState.open = false;
+        appCreateState.error = "";
+        render();
+      }
+      return;
+    }
+
     var refreshMonitorButton = event.target.closest("[data-refresh-monitor]");
     if (refreshMonitorButton) {
       monitorState.lastFetch = 0;
@@ -1515,6 +1966,20 @@
       state.ui.activeApp = openDatabaseButton.getAttribute("data-open-database");
       saveState();
       navigate("database");
+      return;
+    }
+
+    var dbExportButton = event.target.closest("[data-db-export]");
+    if (dbExportButton) {
+      state.ui.activeApp = dbExportButton.getAttribute("data-db-export");
+      saveState();
+      await downloadDatabaseExport(appBySlug(state.ui.activeApp));
+      return;
+    }
+
+    var refreshPortfolioUsageButton = event.target.closest("[data-refresh-portfolio-usage]");
+    if (refreshPortfolioUsageButton) {
+      await loadPortfolioUsage(true);
       return;
     }
 
@@ -1566,6 +2031,46 @@
       return;
     }
 
+    if (event.target.id === "appCreateForm") {
+      event.preventDefault();
+      createRemoteApp(collectCreateAppPayload(event.target));
+      return;
+    }
+
+    if (event.target.matches("[data-token-grant-form]")) {
+      event.preventDefault();
+      var tokenForm = new FormData(event.target);
+      grantPortfolioTokens({
+        ipHash: String(tokenForm.get("ipHash") || "").trim(),
+        clientIp: String(tokenForm.get("clientIp") || "").trim(),
+        tokens: Number(tokenForm.get("tokens") || 0),
+        note: String(tokenForm.get("note") || "").trim()
+      }).catch(function (error) {
+        toast("No pude acreditar tokens: " + (error.message || error));
+      });
+      return;
+    }
+
+  });
+
+  app.addEventListener("input", function (event) {
+    if (event.target.matches("[data-new-app-derived]")) {
+      event.target.dataset.userEdited = "true";
+      return;
+    }
+    if (event.target.id === "newAppName") {
+      var slugInput = document.getElementById("newAppSlug");
+      if (slugInput && slugInput.dataset.userEdited !== "true") {
+        slugInput.value = slugify(event.target.value);
+        updateNewAppDerivedFields(slugInput.value);
+      }
+      return;
+    }
+    if (event.target.id === "newAppSlug") {
+      event.target.dataset.userEdited = "true";
+      event.target.value = slugify(event.target.value);
+      updateNewAppDerivedFields(event.target.value);
+    }
   });
 
   app.addEventListener("change", async function (event) {

@@ -82,6 +82,11 @@ Cuando hagas push a `main`, la VM ejecuta:
 /opt/sgdev-infra/scripts/app-deploy.sh janoai
 ```
 
+Para `portfolio`, ese deploy carga `/etc/sgdev-infra/apps/portfolio.env` antes
+del `.env` del repo. Mantener ahi `VITE_BASE_PATH=/portfolio/` y el mismo valor
+de `PORTFOLIO_USAGE_ADMIN_TOKEN` que usa
+`SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN` en el control API.
+
 ## Logs
 
 ```bash

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import base64
 import json
 import os
 import re
@@ -8,6 +9,8 @@ import subprocess
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib import request as urllib_request
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 
 try:
@@ -19,6 +22,7 @@ except ModuleNotFoundError:
 ROOT = Path(__file__).resolve().parent
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 SERVICE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
+DOMAIN_RE = re.compile(r"^[a-zA-Z0-9.-]+$")
 REMOTE_STATE_SCRIPT = r"""
 import glob
 import json
@@ -420,6 +424,11 @@ VPS_USER = os.getenv("SGDEV_VPS_USER", "root")
 VPS_PASSWORD = os.getenv("SGDEV_VPS_PASSWORD", "")
 REMOTE_INFRA_ROOT = os.getenv("SGDEV_REMOTE_INFRA_ROOT", "/opt/sgdev-infra")
 API_MODE = os.getenv("SGDEV_ADMIN_API_MODE", "ssh" if VPS_HOST else "local").lower()
+PORTFOLIO_API_BASE_URL = os.getenv("SGDEV_PORTFOLIO_API_BASE_URL", "http://127.0.0.1:8787/api").rstrip("/")
+PORTFOLIO_USAGE_ADMIN_TOKEN = os.getenv(
+    "SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN",
+    os.getenv("PORTFOLIO_USAGE_ADMIN_TOKEN", ""),
+)
 
 
 def ssh_exec(command: str, timeout: int = 30) -> tuple[int, str, str]:
@@ -506,6 +515,7 @@ def remote_action(action: str, slug: str, no_pull: bool = False) -> dict:
         "deploy-local": f"./scripts/app-deploy.sh {shlex.quote(slug)} --no-pull",
         "status": f"./scripts/app-status.sh {shlex.quote(slug)}",
         "backup": f"./scripts/app-backup.sh {shlex.quote(slug)}",
+        "db-export": f"./scripts/app-db-export-excel.sh {shlex.quote(slug)}",
         "stop": f"./scripts/app-stop.sh {shlex.quote(slug)}",
         "remove": f"./scripts/app-remove.sh {shlex.quote(slug)}",
         "remove-stop": f"./scripts/app-remove.sh {shlex.quote(slug)} --stop",
@@ -513,9 +523,146 @@ def remote_action(action: str, slug: str, no_pull: bool = False) -> dict:
     if action not in commands:
         raise ValueError("unsupported action")
     script = f"cd {shlex.quote(REMOTE_INFRA_ROOT)} && {commands[action]}"
-    timeout = 600 if action in {"deploy", "deploy-local", "backup"} else 90
+    timeout = 600 if action in {"deploy", "deploy-local", "backup", "db-export"} else 90
     code, stdout, stderr = target_exec("bash -lc " + shlex.quote(script), timeout=timeout)
     return {"exitCode": code, "stdout": stdout, "stderr": stderr, "command": commands[action]}
+
+
+def safe_text(payload: dict, key: str, default: str = "", max_len: int = 500) -> str:
+    value = str(payload.get(key, default) or "").strip()
+    if "\n" in value or "\r" in value:
+        raise ValueError(f"{key} cannot contain newlines")
+    if len(value) > max_len:
+        raise ValueError(f"{key} is too long")
+    return value
+
+
+def remote_create_app(payload: dict) -> dict:
+    slug = safe_text(payload, "slug", max_len=80)
+    if not SLUG_RE.match(slug):
+        raise ValueError("invalid slug")
+
+    name = safe_text(payload, "name", max_len=120)
+    repo_url = safe_text(payload, "repoUrl", max_len=400)
+    domain = safe_text(payload, "domain", max_len=180)
+    app_path = safe_text(payload, "path", f"/{slug}", max_len=160)
+    upstream = safe_text(payload, "upstream", f"http://{slug}-nginx:80", max_len=240)
+    repo_dir = safe_text(payload, "repoDir", f"/opt/apps/{slug}/repo", max_len=260)
+    app_root_default = repo_dir.rsplit("/", 1)[0] if "/" in repo_dir.strip("/") else f"/opt/apps/{slug}"
+    app_root = safe_text(payload, "appRoot", app_root_default, max_len=260)
+    branch = safe_text(payload, "branch", "main", max_len=160)
+    app_id = safe_text(payload, "appId", f"app_{slug.replace('-', '_')}", max_len=120)
+    compose_files = safe_text(payload, "composeFiles", "compose.yml", max_len=400)
+    env_file = safe_text(payload, "envFile", ".env", max_len=120)
+
+    if not repo_url:
+        raise ValueError("repoUrl is required")
+    if not domain or not DOMAIN_RE.match(domain):
+        raise ValueError("invalid domain")
+    if not app_path.startswith("/") or app_path == "/":
+        raise ValueError("path must start with / and cannot be /")
+    if not upstream.startswith(("http://", "https://")):
+        raise ValueError("upstream must start with http:// or https://")
+    if not repo_dir.startswith("/"):
+        raise ValueError("repoDir must be absolute")
+    if not compose_files:
+        raise ValueError("composeFiles is required")
+
+    env_values = {
+        "APP_NAME": name,
+        "APP_ID": app_id,
+        "APP_DOMAIN": domain,
+        "APP_ROOT": app_root,
+        "GIT_REMOTE_URL": repo_url,
+        "BRANCH": branch,
+        "COMPOSE_FILES": compose_files,
+        "ENV_FILE": env_file,
+        "STRIP_PREFIX": "true" if payload.get("stripPrefix", True) else "false",
+        "APP_NEW_CLONE": "true" if payload.get("cloneRepo", True) else "false",
+        "CLIENT_MAX_BODY_SIZE": safe_text(payload, "clientMaxBodySize", "25m", max_len=40),
+        "PROXY_CONNECT_TIMEOUT": safe_text(payload, "proxyConnectTimeout", "10s", max_len=40),
+        "PROXY_READ_TIMEOUT": safe_text(payload, "proxyReadTimeout", "120s", max_len=40),
+        "PROXY_SEND_TIMEOUT": safe_text(payload, "proxySendTimeout", "120s", max_len=40),
+        "BACKUP_VOLUMES": safe_text(payload, "backupVolumes", max_len=400),
+        "BACKUP_PATHS": safe_text(payload, "backupPaths", max_len=400),
+        "DB_EXCEL_ENGINE": safe_text(payload, "dbEngine", max_len=40),
+        "DB_EXCEL_SERVICE": safe_text(payload, "dbService", max_len=80),
+        "DB_EXCEL_DATABASE": safe_text(payload, "dbName", max_len=120),
+        "DB_EXCEL_USER": safe_text(payload, "dbUser", max_len=120),
+        "DB_EXCEL_APP_ID_COLUMN": safe_text(payload, "dbAppIdColumn", "app_id", max_len=80),
+    }
+    if not any(env_values[key] for key in ["DB_EXCEL_ENGINE", "DB_EXCEL_SERVICE", "DB_EXCEL_DATABASE", "DB_EXCEL_USER"]):
+        env_values["DB_EXCEL_APP_ID_COLUMN"] = ""
+    env_parts = [f"{key}={shlex.quote(value)}" for key, value in env_values.items() if value]
+    args = " ".join(shlex.quote(value) for value in [slug, repo_dir, upstream, app_path, compose_files, env_file])
+    command = " ".join(["env", *env_parts, f"./scripts/app-new.sh {args}"])
+    script = f"cd {shlex.quote(REMOTE_INFRA_ROOT)} && {command}"
+    code, stdout, stderr = target_exec("bash -lc " + shlex.quote(script), timeout=300)
+    return {"exitCode": code, "stdout": stdout, "stderr": stderr, "command": f"./scripts/app-new.sh {args}"}
+
+
+def remote_db_export(slug: str) -> bytes:
+    if not SLUG_RE.match(slug):
+        raise ValueError("invalid slug")
+    script = f"""
+set -euo pipefail
+cd {shlex.quote(REMOTE_INFRA_ROOT)}
+tmp_file="$(mktemp --suffix=.xlsx)"
+log_file="$(mktemp)"
+cleanup() {{
+  rm -f "$tmp_file" "$log_file"
+}}
+trap cleanup EXIT
+if ./scripts/app-db-export-excel.sh {shlex.quote(slug)} "$tmp_file" >"$log_file" 2>&1; then
+  base64 -w 0 "$tmp_file" 2>/dev/null || base64 "$tmp_file" | tr -d '\\n'
+else
+  cat "$log_file" >&2
+  exit 1
+fi
+"""
+    code, stdout, stderr = target_exec("bash -lc " + shlex.quote(script), timeout=600)
+    if code != 0:
+        raise RuntimeError(stderr or stdout or f"db export failed with exit {code}")
+    return base64.b64decode(stdout.strip())
+
+
+def portfolio_api_request(method: str, path: str, payload=None) -> dict:
+    if not PORTFOLIO_API_BASE_URL:
+        raise RuntimeError("SGDEV_PORTFOLIO_API_BASE_URL is not configured")
+    url = PORTFOLIO_API_BASE_URL + path
+    body = None
+    headers = {
+        "Accept": "application/json",
+    }
+    if payload is not None:
+        body = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    if PORTFOLIO_USAGE_ADMIN_TOKEN:
+        headers["Authorization"] = f"Bearer {PORTFOLIO_USAGE_ADMIN_TOKEN}"
+        headers["X-Sgdev-Portfolio-Admin-Token"] = PORTFOLIO_USAGE_ADMIN_TOKEN
+
+    request = urllib_request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib_request.urlopen(request, timeout=20) as response:
+            raw = response.read().decode("utf-8", "replace")
+            return json.loads(raw or "{}")
+    except HTTPError as exc:
+        raw = exc.read().decode("utf-8", "replace")
+        try:
+            error_payload = json.loads(raw)
+        except json.JSONDecodeError:
+            error_payload = {"message": raw}
+        raise RuntimeError(error_payload.get("message") or error_payload.get("error") or f"portfolio HTTP {exc.code}")
+    except URLError as exc:
+        raise RuntimeError(f"portfolio API unavailable: {exc.reason}") from exc
+
+
+def portfolio_usage() -> dict:
+    return portfolio_api_request("GET", "/admin/usage/ips")
+
+
+def portfolio_grant_tokens(payload: dict) -> dict:
+    return portfolio_api_request("POST", "/admin/usage/grant", payload)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -526,6 +673,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def send_bytes(self, status: int, body: bytes, content_type: str, filename: str = "") -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        if filename:
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.end_headers()
         self.wfile.write(body)
 
@@ -567,6 +723,21 @@ class Handler(BaseHTTPRequestHandler):
                 tail = int((query.get("tail") or ["200"])[0])
                 self.send_json(200, {"ok": True, **remote_logs(slug, service, tail)})
                 return
+            if parsed.path == "/db/export":
+                query = parse_qs(parsed.query)
+                slug = (query.get("slug") or [""])[0]
+                body = remote_db_export(slug)
+                stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+                self.send_bytes(
+                    200,
+                    body,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    f"{slug}-db-{stamp}.xlsx",
+                )
+                return
+            if parsed.path == "/portfolio/usage":
+                self.send_json(200, portfolio_usage())
+                return
             self.send_json(404, {"ok": False, "error": "not found"})
         except Exception as exc:
             self.send_json(500, {"ok": False, "error": str(exc)})
@@ -586,6 +757,13 @@ class Handler(BaseHTTPRequestHandler):
                     bool(payload.get("noPull", False)),
                 )
                 self.send_json(200, {"ok": result["exitCode"] == 0, **result})
+                return
+            if parsed.path == "/apps":
+                result = remote_create_app(payload)
+                self.send_json(200, {"ok": result["exitCode"] == 0, **result})
+                return
+            if parsed.path == "/portfolio/usage/grant":
+                self.send_json(200, portfolio_grant_tokens(payload))
                 return
             self.send_json(404, {"ok": False, "error": "not found"})
         except Exception as exc:

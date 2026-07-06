@@ -92,12 +92,18 @@ SGDEV_ADMIN_API_TOKEN=$token
 SGDEV_REMOTE_INFRA_ROOT=$SGDEV_INFRA_ROOT
 SGDEV_INFRA_ROOT=$SGDEV_INFRA_ROOT
 SGDEV_APPS_CONFIG_DIR=$SGDEV_APPS_CONFIG_DIR
+SGDEV_PORTFOLIO_API_BASE_URL=https://${SGDEV_PRIMARY_DOMAIN:-sgdev.com.ar}/portfolio/api
+SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN=$token
 EOF
   log "Created $control_env_file"
 else
   log "Keeping existing $control_env_file"
 fi
 set_env_value "$control_env_file" "SGDEV_ADMIN_API_HOST" "$admin_bind_host"
+set_env_value "$control_env_file" "SGDEV_PORTFOLIO_API_BASE_URL" "https://${SGDEV_PRIMARY_DOMAIN:-sgdev.com.ar}/portfolio/api"
+if ! grep -q '^SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN=' "$control_env_file" 2>/dev/null; then
+  set_env_value "$control_env_file" "SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN" "$token"
+fi
 
 chown "$service_user":"$service_user" "$control_env_file" || true
 chmod 600 "$control_env_file" || true

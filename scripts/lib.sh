@@ -72,6 +72,10 @@ load_app_config() {
 
 compose_base_args() {
   local args=(--project-directory "$REPO_DIR")
+  local app_config_file="$SGDEV_APPS_CONFIG_DIR/$APP_SLUG.env"
+  if [[ -f "$app_config_file" ]]; then
+    args+=(--env-file "$app_config_file")
+  fi
   local env_file_abs
   env_file_abs="$(abs_path "$REPO_DIR" "$ENV_FILE")"
   if [[ -f "$env_file_abs" ]]; then

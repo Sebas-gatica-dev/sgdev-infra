@@ -115,9 +115,10 @@ En la VM:
 /opt/apps/portfolio/repo
 ```
 
-Este proyecto ya trae `docker-compose.yml` con frontend, backend, DB y un Nginx
-interno. Para publicar bajo `/portfolio`, compilar el frontend con
-`VITE_BASE_PATH=/portfolio/`.
+Este proyecto ya trae `docker-compose.yml` con frontend, backend, DB, Ollama,
+FastAPI para modelo gratuito y un Nginx interno. Para publicar bajo
+`/portfolio`, compilar el frontend con `VITE_BASE_PATH=/portfolio/` y usar
+upstream `http://portfolio-nginx:80`.
 
 La variante actual del portfolio tambien levanta un modelo local gratuito con
 Ollama/FastAPI. No necesita publicarse al proxy compartido: queda en la red
@@ -138,7 +139,24 @@ compose, activar:
 PORTFOLIO_FREE_MODEL_ENABLED=true
 PORTFOLIO_FREE_MODEL_NAME=qwen3:0.6b
 VITE_BASE_PATH=/portfolio/
+PORTFOLIO_USAGE_ADMIN_TOKEN=<mismo valor que SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN>
 ```
+
+El refactor interno del backend del portfolio separa paquetes Java por dominio
+(`agent`, `appointment`, `document`, `usage`, etc.), pero mantiene el contrato
+HTTP consumido por esta infra:
+
+```text
+GET  /portfolio/api/portfolio/health
+GET  /portfolio/api/admin/usage/ips
+POST /portfolio/api/admin/usage/grant
+POST /portfolio/api/agent/chat/stream
+POST /portfolio/api/agent/document/summary
+```
+
+El admin de `Sgdev-infra` usa `SGDEV_PORTFOLIO_API_BASE_URL`, normalmente
+`https://sgdev.com.ar/portfolio/api`, y autentica las acciones de tokens con
+`SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN`.
 
 Antes de subir este proyecto a GitHub, revisar que no haya claves reales en
 `application.properties`, `.env` o archivos similares. Las claves deben venir

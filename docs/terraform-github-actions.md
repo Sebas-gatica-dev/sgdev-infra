@@ -54,10 +54,20 @@ export TF_VAR_ssh_private_key="$(cat ~/.ssh/sgdev_deploy)"
 
 ## Publicar portfolio en /portfolio
 
-El portfolio debe compilarse con:
+En la VPS, el portfolio se despliega con:
 
 ```bash
-VITE_BASE_PATH=/portfolio/ docker compose up -d --build
+cd /opt/sgdev-infra
+./scripts/app-deploy.sh portfolio
+```
+
+`app-deploy.sh` carga primero `/etc/sgdev-infra/apps/portfolio.env` y luego el
+`.env` del repo del portfolio. Asegurar que alguno de esos archivos defina:
+
+```bash
+VITE_BASE_PATH=/portfolio/
+PUBLIC_APP_URL=https://sgdev.com.ar/portfolio
+PORTFOLIO_USAGE_ADMIN_TOKEN=<token compartido con SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN>
 ```
 
 La config que Terraform genera para el gateway usa:
@@ -70,7 +80,8 @@ STRIP_PREFIX=false
 ```
 
 Con eso el gateway recibe `https://sgdev.com.ar/portfolio/...` y la app conserva
-el prefijo `/portfolio`.
+el prefijo `/portfolio`. El backend del portfolio mantiene rutas estables bajo
+`/portfolio/api`, incluyendo health, chat y administracion de cuotas por IP.
 
 ## HTTPS
 

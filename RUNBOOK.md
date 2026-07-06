@@ -154,9 +154,26 @@ El instalador deja dos servicios locales:
   scripts versionados.
 
 Pegar el valor de `SGDEV_ADMIN_API_TOKEN` en el login del admin. El control API
-solo acepta acciones cerradas por slug: deploy, rebuild sin pull, status,
-backup, stop y remove. Las altas nuevas, WordPress e import DB quedan como
-recetas manuales en Ayuda hasta tener endpoints dedicados.
+solo acepta acciones cerradas: deploy, rebuild sin pull, status, backup, stop,
+remove, alta guiada de apps, export DB Excel y administracion de tokens OpenAI
+del portfolio. WordPress e import DB siguen como recetas manuales en Ayuda.
+
+Para administrar tokens OpenAI del portfolio desde `/admin`, configurar en el
+portfolio `PORTFOLIO_USAGE_ADMIN_TOKEN` y en el control API
+`SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN` con el mismo valor. La URL del backend se
+lee desde `SGDEV_PORTFOLIO_API_BASE_URL` y suele ser
+`https://sgdev.com.ar/portfolio/api`.
+
+El portfolio refactorizado mantiene estas rutas externas, aunque internamente el
+backend Java ahora este dividido por dominios:
+
+```text
+GET  /portfolio/api/portfolio/health
+GET  /portfolio/api/admin/usage/ips
+POST /portfolio/api/admin/usage/grant
+POST /portfolio/api/agent/chat/stream
+POST /portfolio/api/agent/document/summary
+```
 
 Comandos utiles:
 
@@ -221,6 +238,11 @@ DB_EXCEL_DATABASE=app
 DB_EXCEL_USER=app
 DB_EXCEL_APP_ID_COLUMN=app_id
 ```
+
+Ese mismo archivo de app tambien se pasa a Docker Compose antes del `.env` del
+repo. Usarlo para defaults de infra como `VITE_BASE_PATH`, `PUBLIC_APP_URL` o
+`PORTFOLIO_USAGE_ADMIN_TOKEN`; dejar secretos especificos del runtime en el
+`.env` del proyecto cuando se prefiera sobrescribirlos por deploy.
 
 Para WordPress creado con `scripts/app-new-wordpress.sh`, esos campos quedan
 generados apuntando a MariaDB.
