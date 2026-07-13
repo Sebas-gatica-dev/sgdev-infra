@@ -49,8 +49,6 @@ elif [[ "$no_pull" != "true" ]]; then
 fi
 
 docker network inspect "$PROXY_NETWORK" >/dev/null 2>&1 || docker network create "$PROXY_NETWORK"
-docker network inspect "$DATA_NETWORK" >/dev/null 2>&1 || docker network create "$DATA_NETWORK"
-docker network inspect "$SERVICE_NETWORK" >/dev/null 2>&1 || docker network create "$SERVICE_NETWORK"
 
 compose_args="$(compose_base_args)"
 log "Deploying $APP_SLUG with Docker Compose"
