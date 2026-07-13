@@ -6,6 +6,7 @@
   var SESSION_KEY = "sgdev.admin.session.v1";
   var API_TOKEN_KEY = "sgdev.admin.api.token.v1";
   var MONITOR_REFRESH_MS = 10000;
+  var LOG_REFRESH_MS = 5000;
   var app = document.getElementById("app");
   var remote = {
     available: false,
@@ -19,7 +20,8 @@
     key: "",
     loading: false,
     text: "",
-    error: ""
+    error: "",
+    lastUpdated: ""
   };
   var actionState = {
     running: false,
@@ -469,7 +471,9 @@
         activeApp: "portfolio",
         helpSection: "operate",
         helpTemplate: "checklist",
-        logService: "all"
+        logService: "all",
+        logTail: "120",
+        logLive: true
       },
       apps: [],
       operations: [],
@@ -949,25 +953,49 @@
     return match ? match[1] : "";
   }
 
-  async function loadRemoteLogs(item) {
+  async function loadRemoteLogs(item, options) {
+    options = options || {};
     if (!remote.available || !item) return;
     var service = state.ui.logService === "all" ? "" : (state.ui.logService || "");
-    var key = item.slug + ":" + service;
-    if (logState.loading || logState.key === key && logState.text) return;
-    logState = { key: key, loading: true, text: "", error: "" };
-    render();
+    var tail = String(state.ui.logTail || "120");
+    var key = item.slug + ":" + service + ":" + tail;
+    if (logState.loading || (!options.force && logState.key === key && logState.text)) return;
+    var keepText = options.silent && logState.key === key;
+    logState = {
+      key: key,
+      loading: true,
+      text: keepText ? logState.text : "",
+      error: "",
+      lastUpdated: logState.lastUpdated || ""
+    };
+    if (!options.silent) render();
     try {
-      var payload = await apiRequest("/logs?slug=" + encodeURIComponent(item.slug) + "&service=" + encodeURIComponent(service) + "&tail=200");
+      var payload = await apiRequest("/logs?slug=" + encodeURIComponent(item.slug) + "&service=" + encodeURIComponent(service) + "&tail=" + encodeURIComponent(tail));
       logState = {
         key: key,
         loading: false,
         text: [payload.stdout || "", payload.stderr || ""].filter(Boolean).join("\n").trim(),
-        error: payload.exitCode === 0 ? "" : "docker logs termino con codigo " + payload.exitCode
+        error: payload.exitCode === 0 ? "" : "docker logs termino con codigo " + payload.exitCode,
+        lastUpdated: nowStamp()
       };
     } catch (error) {
-      logState = { key: key, loading: false, text: "", error: error.message || String(error) };
+      logState = {
+        key: key,
+        loading: false,
+        text: keepText ? logState.text : "",
+        error: error.message || String(error),
+        lastUpdated: logState.lastUpdated || ""
+      };
     }
     render();
+    scrollLogsToBottom();
+  }
+
+  function scrollLogsToBottom() {
+    window.setTimeout(function () {
+      var node = document.querySelector("[data-logs-console]");
+      if (node) node.scrollTop = node.scrollHeight;
+    }, 0);
   }
 
   function escapeHtml(value) {
@@ -1387,15 +1415,23 @@
     var item = activeApp();
     if (!item) return emptyPanel("Logs", "No hay apps reales cargadas para leer logs.", "Sincronizar", "sync");
     var service = state.ui.logService || "all";
-    if (remote.available && logState.key !== item.slug + ":" + (service === "all" ? "" : service) && !logState.loading) {
-      window.setTimeout(function () { loadRemoteLogs(item); }, 0);
+    var tail = String(state.ui.logTail || "120");
+    var live = state.ui.logLive !== false;
+    var key = item.slug + ":" + (service === "all" ? "" : service) + ":" + tail;
+    if (remote.available && logState.key !== key && !logState.loading) {
+      window.setTimeout(function () { loadRemoteLogs(item, { force: true }); }, 0);
     }
     var logText = remote.error ? "API no disponible: " + remote.error : "Conecta la VPS para leer logs reales.";
+    var content = remote.available ? (logState.loading && !logState.text ? "Cargando logs reales..." : logState.error || logState.text || "Sin logs para mostrar.") : logText;
+    var metaText = remote.available
+      ? (live ? "Live cada 5s" : "Live pausado") + (logState.lastUpdated ? " | Actualizado " + logState.lastUpdated.split(" ").pop() : "")
+      : "Sin conexion a la API";
     return [
       '<section class="content-grid">',
       '<div class="panel">',
-      '<div class="section-title"><div><h2>Salida</h2><p>' + (remote.available ? "Logs reales leidos desde la VPS." : "Sin lectura real de logs todavia.") + '</p></div><div class="btn-row">' + appSelect("logAppSelect") + '<select class="select" id="logServiceSelect"><option value="all"' + (service === "all" ? " selected" : "") + '>all</option><option value="web"' + (service === "web" ? " selected" : "") + '>web</option><option value="nginx"' + (service === "nginx" ? " selected" : "") + '>nginx</option><option value="api"' + (service === "api" ? " selected" : "") + '>api</option><option value="db"' + (service === "db" ? " selected" : "") + '>db</option></select><button class="btn icon-only" type="button" title="Actualizar logs" aria-label="Actualizar logs" data-refresh-logs>' + icons.refresh + "</button></div></div>",
-      '<div class="logs-console"><span class="' + (logState.error ? "err" : "ok") + '">' + escapeHtml(remote.available ? (logState.loading ? "Cargando logs reales..." : logState.error || logState.text || "Sin logs para mostrar.") : logText).replace(/\\n/g, '</span>\\n<span class="' + (logState.error ? "err" : "ok") + '">') + "</span></div>",
+      '<div class="section-title"><div><h2>Salida</h2><p>' + (remote.available ? "Logs reales leidos desde la VPS." : "Sin lectura real de logs todavia.") + '</p></div><div class="btn-row logs-toolbar">' + appSelect("logAppSelect") + '<select class="select" id="logServiceSelect"><option value="all"' + (service === "all" ? " selected" : "") + '>all</option><option value="web"' + (service === "web" ? " selected" : "") + '>web</option><option value="nginx"' + (service === "nginx" ? " selected" : "") + '>nginx</option><option value="api"' + (service === "api" ? " selected" : "") + '>api</option><option value="db"' + (service === "db" ? " selected" : "") + '>db</option></select><select class="select" id="logTailSelect"><option value="80"' + (tail === "80" ? " selected" : "") + '>80 lineas</option><option value="120"' + (tail === "120" ? " selected" : "") + '>120 lineas</option><option value="250"' + (tail === "250" ? " selected" : "") + '>250 lineas</option><option value="500"' + (tail === "500" ? " selected" : "") + '>500 lineas</option></select><button class="btn ' + (live ? "primary" : "") + '" type="button" data-toggle-log-live>' + icons.refresh + (live ? " Live" : " Pausado") + '</button><button class="btn icon-only" type="button" title="Actualizar logs" aria-label="Actualizar logs" data-refresh-logs>' + icons.refresh + "</button></div></div>",
+      '<div class="logs-meta"><span class="status-pill ' + (logState.error ? "warn" : "ok") + '"><span class="dot"></span>' + escapeHtml(metaText) + '</span>' + (logState.loading && logState.text ? '<span>Cargando actualizacion...</span>' : "") + '</div>',
+      '<div class="logs-console" data-logs-console><span class="' + (logState.error ? "err" : "ok") + '">' + escapeHtml(content) + "</span></div>",
       "</div>",
       '<div class="panel">',
       '<div class="section-title"><div><h2>Contexto</h2><p>Servicio, upstream y contenedores asociados.</p></div><button class="btn" type="button" data-route="help">' + icons.help + " Ayuda</button></div>",
@@ -1930,7 +1966,16 @@
     var refreshLogsButton = event.target.closest("[data-refresh-logs]");
     if (refreshLogsButton) {
       logState.key = "";
-      await loadRemoteLogs(activeApp());
+      await loadRemoteLogs(activeApp(), { force: true });
+      return;
+    }
+
+    var toggleLogLiveButton = event.target.closest("[data-toggle-log-live]");
+    if (toggleLogLiveButton) {
+      state.ui.logLive = state.ui.logLive === false;
+      saveState();
+      render();
+      if (state.ui.logLive) await loadRemoteLogs(activeApp(), { force: true });
       return;
     }
 
@@ -2085,7 +2130,7 @@
       render();
       if (event.target.id === "logAppSelect") {
         logState.key = "";
-        await loadRemoteLogs(activeApp());
+        await loadRemoteLogs(activeApp(), { force: true });
       }
       return;
     }
@@ -2095,13 +2140,28 @@
       saveState();
       render();
       logState.key = "";
-      await loadRemoteLogs(activeApp());
+      await loadRemoteLogs(activeApp(), { force: true });
+      return;
+    }
+
+    if (event.target.id === "logTailSelect") {
+      state.ui.logTail = event.target.value;
+      saveState();
+      render();
+      logState.key = "";
+      await loadRemoteLogs(activeApp(), { force: true });
+      return;
     }
   });
 
   window.setInterval(function () {
     if (session && isMonitorRoute(currentRoute())) requestMonitorSnapshot(false);
   }, MONITOR_REFRESH_MS);
+
+  window.setInterval(function () {
+    if (!session || currentRoute() !== "logs" || !remote.available || state.ui.logLive === false) return;
+    loadRemoteLogs(activeApp(), { force: true, silent: true });
+  }, LOG_REFRESH_MS);
 
   window.addEventListener("popstate", render);
   render();

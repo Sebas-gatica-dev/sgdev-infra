@@ -225,6 +225,11 @@ button {
   align-items: center;
 }
 
+.logs-toolbar .select {
+  width: auto;
+  min-width: 116px;
+}
+
 .btn {
   min-height: 38px;
   display: inline-flex;
@@ -929,6 +934,7 @@ tr:last-child td {
 
 .logs-console {
   min-height: 430px;
+  max-height: min(62vh, 680px);
   padding: 16px;
   overflow: auto;
   color: #dfe7ef;
@@ -938,6 +944,16 @@ tr:last-child td {
   font-size: 12px;
   line-height: 1.7;
   white-space: pre-wrap;
+}
+
+.logs-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .logs-console .ok {
@@ -1364,6 +1380,7 @@ tr:last-child td {
   }
 
   .btn-row .btn,
+  .logs-toolbar .select,
   .top-actions .btn,
   .mobile-nav {
     flex: 1 1 auto;
