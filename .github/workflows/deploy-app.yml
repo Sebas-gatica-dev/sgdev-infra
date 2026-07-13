@@ -72,6 +72,11 @@ jobs:
           run cd /opt/sgdev-infra
           run git fetch origin main
           run git checkout main
+          if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+            stash_name="github-actions-pre-pull-$(date +%Y%m%d%H%M%S)"
+            log "Stashing local infra changes before pull: $stash_name"
+            run git stash push -m "$stash_name"
+          fi
           run git pull --ff-only origin main
           run chmod +x scripts/*.sh
 
@@ -83,7 +88,7 @@ jobs:
 
           run ./scripts/proxy-up.sh
           run ./scripts/sync-ssl-conf.sh
-          run ./scripts/proxy-reload.sh
+          run ./scripts/proxy-reload.sh </dev/null
 
           deploy_args=("$slug")
           if [ "$no_pull" = "true" ]; then
