@@ -884,6 +884,7 @@ curl -I https://sgdev.com.ar/health
 
 - [Runbook operativo](RUNBOOK.md)
 - [Arquitectura](docs/architecture.md)
+- [Servicios compartidos](docs/shared-services.md)
 - [VPS Google Cloud](docs/vps-google-cloud.md)
 - [Termius y SSH](docs/termius.md)
 - [CI/CD con GitHub](docs/github-cicd.md)

@@ -45,6 +45,12 @@ fi
 log "Creating Docker proxy network: $PROXY_NETWORK"
 docker network inspect "$PROXY_NETWORK" >/dev/null 2>&1 || docker network create "$PROXY_NETWORK"
 
+log "Creating Docker data network: $DATA_NETWORK"
+docker network inspect "$DATA_NETWORK" >/dev/null 2>&1 || docker network create "$DATA_NETWORK"
+
+log "Creating Docker services network: $SERVICE_NETWORK"
+docker network inspect "$SERVICE_NETWORK" >/dev/null 2>&1 || docker network create "$SERVICE_NETWORK"
+
 log "Opening basic firewall rules if ufw is enabled"
 ufw allow OpenSSH >/dev/null || true
 ufw allow 80/tcp >/dev/null || true

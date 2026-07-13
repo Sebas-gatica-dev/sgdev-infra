@@ -1,0 +1,67 @@
+name: ${COMPOSE_PROJECT_NAME:-sgdev-mercadolibre}
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    command: ["sh", "-c", "sleep infinity"]
+    environment:
+      PGHOST: ${DB_HOST:-sgdev-postgres}
+      PGPORT: ${DB_PORT:-5432}
+      POSTGRES_DB: ${DB_NAME:-mercadolibre}
+      POSTGRES_USER: ${DB_USER:-mercadolibre}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-}
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h ${DB_HOST:-sgdev-postgres} -p ${DB_PORT:-5432} -U ${DB_USER:-mercadolibre} -d ${DB_NAME:-mercadolibre}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  api:
+    build:
+      context: ./services/mercadolibre
+    container_name: sgdev-mercadolibre-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      SERVICE_TOKEN: ${SERVICE_TOKEN:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://sgdev.com.ar/mercadolibre}
+      MERCADOPAGO_ACCESS_TOKEN: ${MERCADOPAGO_ACCESS_TOKEN:-}
+      MERCADOPAGO_WEBHOOK_SECRET: ${MERCADOPAGO_WEBHOOK_SECRET:-}
+      MERCADOPAGO_NOTIFICATION_URL: ${MERCADOPAGO_NOTIFICATION_URL:-}
+      MERCADOLIBRE_CLIENT_ID: ${MERCADOLIBRE_CLIENT_ID:-}
+      MERCADOLIBRE_CLIENT_SECRET: ${MERCADOLIBRE_CLIENT_SECRET:-}
+      MERCADOLIBRE_REDIRECT_URI: ${MERCADOLIBRE_REDIRECT_URI:-}
+    expose:
+      - "8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      proxy:
+        aliases:
+          - mercadolibre-api
+      services:
+        aliases:
+          - mercadolibre-api
+      data:
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+networks:
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:-sgdev-proxy}
+  services:
+    external: true
+    name: ${SERVICE_NETWORK:-sgdev-services}
+  data:
+    external: true
+    name: ${DATA_NETWORK:-sgdev-data}

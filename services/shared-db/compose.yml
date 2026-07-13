@@ -1,0 +1,44 @@
+name: ${COMPOSE_PROJECT_NAME:-sgdev-shared-db}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: sgdev-shared-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sgdev}
+      POSTGRES_USER: ${POSTGRES_USER:-sgdev_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      ARGENTICOMMERCE_DB: ${ARGENTICOMMERCE_DB:-argenticommerce}
+      ARGENTICOMMERCE_DB_USER: ${ARGENTICOMMERCE_DB_USER:-argenticommerce}
+      ARGENTICOMMERCE_DB_PASSWORD: ${ARGENTICOMMERCE_DB_PASSWORD:?ARGENTICOMMERCE_DB_PASSWORD is required}
+      MERCADOLIBRE_DB: ${MERCADOLIBRE_DB:-mercadolibre}
+      MERCADOLIBRE_DB_USER: ${MERCADOLIBRE_DB_USER:-mercadolibre}
+      MERCADOLIBRE_DB_PASSWORD: ${MERCADOLIBRE_DB_PASSWORD:?MERCADOLIBRE_DB_PASSWORD is required}
+      RAG_DB: ${RAG_DB:-rag}
+      RAG_DB_USER: ${RAG_DB_USER:-rag}
+      RAG_DB_PASSWORD: ${RAG_DB_PASSWORD:?RAG_DB_PASSWORD is required}
+    expose:
+      - "5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sgdev_admin} -d ${POSTGRES_DB:-sgdev}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      data:
+        aliases:
+          - sgdev-postgres
+
+volumes:
+  postgres_data:
+    name: sgdev_shared_postgres_data
+
+networks:
+  data:
+    external: true
+    name: ${DATA_NETWORK:-sgdev-data}
