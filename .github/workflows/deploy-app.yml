@@ -40,34 +40,28 @@ jobs:
           SLUG: ${{ inputs.slug }}
           NO_PULL: ${{ inputs.no_pull }}
         run: |
-          set -Eeuo pipefail
-
+          set -eu
+          extra=""
+          if [ "$NO_PULL" = "true" ]; then
+            extra="--no-pull"
+          fi
           ssh \
             -i ~/.ssh/sgdev_deploy \
             -p "$SSH_PORT" \
-            -o BatchMode=yes \
             -o ServerAliveInterval=20 \
             -o ServerAliveCountMax=6 \
             -o TCPKeepAlive=yes \
             -o ConnectTimeout=20 \
-            "$SSH_USER@$SSH_HOST" bash -s -- "$SLUG" "$NO_PULL" <<'REMOTE_SCRIPT'
-          set -Eeuo pipefail
+            "$SSH_USER@$SSH_HOST" bash -s -- "$SLUG" "$extra" <<'REMOTE_SCRIPT'
+          set -euo pipefail
 
           slug="$1"
-          no_pull="${2:-false}"
-
-          trap 'rc=$?; printf "[deploy] ERROR line %s while running: %s\n" "$LINENO" "$BASH_COMMAND" >&2; exit "$rc"' ERR
-
-          log() {
-            printf '[deploy] %s\n' "$*"
-          }
+          extra="${2:-}"
 
           run() {
             printf '\n[deploy] %s\n' "$*"
             "$@"
           }
-
-          log "Connected as $(id -un) on $(hostname)"
 
           run cd /opt/sgdev-infra
           run git fetch origin main
@@ -84,11 +78,6 @@ jobs:
           run ./scripts/proxy-up.sh
           run ./scripts/sync-ssl-conf.sh
           run ./scripts/proxy-reload.sh
-
-          deploy_args=("$slug")
-          if [ "$no_pull" = "true" ]; then
-            deploy_args+=(--no-pull)
-          fi
-
-          run ./scripts/app-deploy.sh "${deploy_args[@]}"
+          # shellcheck disable=SC2086
+          run ./scripts/app-deploy.sh "$slug" $extra
           REMOTE_SCRIPT
