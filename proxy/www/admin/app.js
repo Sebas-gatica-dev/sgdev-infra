@@ -57,6 +57,12 @@
     editorOpen: false,
     editingId: ""
   };
+  var openClawState = {
+    loading: false,
+    data: null,
+    error: "",
+    lastUpdated: ""
+  };
 
   var icons = {
     dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 13h8V3H3v10zM13 21h8v-8h-8v8zM13 3v8h8V3h-8zM3 21h8v-6H3v6z"/></svg>',
@@ -86,6 +92,7 @@
   var navItems = [
     ["dashboard", "Tablero", icons.dashboard],
     ["apps", "Apps", icons.server],
+    ["openclaw", "OpenClaw", icons.shield],
     ["projects", "Portfolio", icons.external],
     ["logs", "Logs", icons.logs],
     ["metrics", "Monitoreo", icons.chart],
@@ -976,6 +983,23 @@
     }
   }
 
+  async function loadOpenClawStatus(force) {
+    if (openClawState.loading) return;
+    if (!force && openClawState.data && !openClawState.error) return;
+    openClawState.loading = true;
+    openClawState.error = "";
+    render();
+    try {
+      openClawState.data = await apiRequest("/openclaw/status");
+      openClawState.lastUpdated = nowStamp();
+    } catch (error) {
+      openClawState.error = error.message || String(error);
+    } finally {
+      openClawState.loading = false;
+      render();
+    }
+  }
+
   async function savePortfolioProject(payload, coverFile, galleryFiles) {
     portfolioProjectsState.saving = true;
     portfolioProjectsState.error = "";
@@ -1292,6 +1316,9 @@
     if (session && route === "projects" && !portfolioProjectsState.loading && !portfolioProjectsState.items.length && !portfolioProjectsState.error) {
       loadPortfolioProjects(false);
     }
+    if (session && route === "openclaw" && !openClawState.loading && !openClawState.data && !openClawState.error) {
+      loadOpenClawStatus(false);
+    }
   }
 
   function renderLogin() {
@@ -1331,6 +1358,7 @@
     var renderers = {
       dashboard: renderDashboard,
       apps: renderApps,
+      openclaw: renderOpenClaw,
       projects: renderPortfolioProjects,
       logs: renderLogs,
       metrics: renderMetrics,
@@ -1390,6 +1418,7 @@
     var title = {
       dashboard: ["Tablero", "Estado de VPS, apps y acciones frecuentes."],
       apps: ["Apps", "Inventario operativo de proyectos."],
+      openclaw: ["OpenClaw", "Runtime, seguridad, version y acceso a la consola de agentes."],
       projects: ["Portfolio", "Catalogo editorial de proyectos publicados y borradores."],
       logs: ["Logs", "Vista de comandos y salida esperada por servicio."],
       metrics: ["Monitoreo", "CPU, memoria, disco, procesos, red y Docker de la VPS."],
@@ -1556,6 +1585,56 @@
       }).join("") + "</div>" : '<div class="monitor-empty"><span>' + icons.server + '</span><div><strong>No hay apps cargadas todavia.</strong><p>Sincroniza la VPS o crea una nueva app con el alta guiada.</p></div></div>',
       "</section>"
     ].join("");
+  }
+
+  function renderOpenClaw() {
+    if (openClawState.loading && !openClawState.data) {
+      return '<section class="panel"><div class="monitor-empty"><span>' + icons.refresh + '</span><div><strong>Auditando OpenClaw</strong><p>Consultando contenedor, version, red, ruta HTTPS y hallazgos de seguridad.</p></div></div></section>';
+    }
+    if (openClawState.error) {
+      return '<section class="panel"><div class="form-alert error">' + escapeHtml(openClawState.error) + '</div><div class="btn-row"><button class="btn" type="button" data-refresh-openclaw>' + icons.refresh + ' Reintentar</button></div></section>';
+    }
+
+    var item = openClawState.data || {};
+    var summary = item.securitySummary || {};
+    var findings = Array.isArray(item.securityFindings) ? item.securityFindings : [];
+    var publicPorts = Array.isArray(item.publicPorts) ? item.publicPorts : [];
+    var healthy = item.installed && item.status === "running" && (item.health === "healthy" || item.health === "running");
+    var routeReady = Number(item.routeStatus || 0) >= 200 && Number(item.routeStatus || 0) < 400;
+    var secure = healthy && routeReady && !publicPorts.length && Number(summary.critical || 0) === 0;
+    var runtimeApp = state.apps.find(function (appItem) { return appItem.slug === "openclaw-hub"; });
+    var migrationNotice = item.migrationRequired
+      ? '<div class="openclaw-notice danger"><span>' + icons.shield + '</span><div><strong>Migracion requerida</strong><p>La instancia detectada es la instalacion heredada. Sigue expuesta o conserva configuracion insegura; no debe usarse como runtime multiempresa.</p></div></div>'
+      : '<div class="openclaw-notice success"><span>' + icons.shield + '</span><div><strong>Gateway operator aislado</strong><p>La consola administrativa usa una celda propia. Las empresas se aprovisionan en celdas separadas.</p></div></div>';
+    var actionButtons = runtimeApp
+      ? '<button class="btn" type="button" data-app-action="deploy-local" data-slug="openclaw-hub">' + icons.refresh + ' Reaplicar deploy</button><button class="btn" type="button" data-app-action="backup" data-slug="openclaw-hub">' + icons.backup + ' Backup</button>'
+      : '';
+
+    return [
+      '<section class="openclaw-hero">',
+      '<div><p class="eyebrow">AGENT RUNTIME</p><h2>OpenClaw Hub</h2><p>Versiona el nucleo una vez; SgInfra despliega y observa cada frontera de confianza por separado.</p></div>',
+      '<div class="btn-row"><button class="btn" type="button" data-refresh-openclaw>' + icons.refresh + ' Auditar</button>' + actionButtons + '<a class="btn primary" href="/admin-openclaw/" target="_blank" rel="noopener">' + icons.external + ' Abrir Control UI</a></div>',
+      '</section>',
+      migrationNotice,
+      '<section class="openclaw-stat-grid">',
+      openClawStat("Estado", healthy ? "Operativo" : "Revisar", item.status || "no instalado", healthy ? "running" : "stopped"),
+      openClawStat("Version", item.version || "-", item.image || "sin imagen", item.migrationRequired ? "stopped" : "running"),
+      openClawStat("Ruta HTTPS", routeReady ? "HTTP " + item.routeStatus : "No disponible", item.routeUrl || "/admin-openclaw/", routeReady ? "running" : "stopped"),
+      openClawStat("Puertos publicos", String(publicPorts.length), publicPorts.length ? "Debe quedar en cero" : "Solo red sgdev-proxy", publicPorts.length ? "stopped" : "running"),
+      '</section>',
+      '<section class="two-column openclaw-columns">',
+      '<article class="panel"><div class="section-title"><div><h2>Contenedor</h2><p>Identidad de ejecucion y red.</p></div><span class="status-pill ' + (secure ? "running" : "stopped") + '"><span class="dot"></span>' + (secure ? "Seguro" : "Pendiente") + '</span></div>',
+      '<dl class="openclaw-details"><div><dt>Nombre</dt><dd>' + escapeHtml(item.container || "-") + '</dd></div><div><dt>Usuario</dt><dd>' + escapeHtml(item.user || "-") + '</dd></div><div><dt>Salud</dt><dd>' + escapeHtml(item.health || "-") + '</dd></div><div><dt>Reinicios</dt><dd>' + escapeHtml(item.restartCount || 0) + '</dd></div><div><dt>Redes</dt><dd>' + escapeHtml((item.networks || []).join(", ") || "-") + '</dd></div><div><dt>Ultima auditoria</dt><dd>' + escapeHtml(openClawState.lastUpdated || "-") + '</dd></div></dl></article>',
+      '<article class="panel"><div class="section-title"><div><h2>Security audit</h2><p>Resultado sanitizado de OpenClaw.</p></div><span class="status-pill ' + (Number(summary.critical || 0) ? "stopped" : "running") + '"><span class="dot"></span>' + escapeHtml(Number(summary.critical || 0)) + ' criticos</span></div>',
+      findings.length ? '<div class="openclaw-findings">' + findings.map(function (finding) { return '<div><span class="severity ' + escapeHtml(finding.severity || "info") + '">' + escapeHtml(finding.severity || "info") + '</span><p><strong>' + escapeHtml(finding.title || finding.checkId || "Hallazgo") + '</strong><small>' + escapeHtml(finding.checkId || "") + '</small></p></div>'; }).join("") + '</div>' : '<div class="monitor-empty compact"><span>' + icons.shield + '</span><div><strong>Sin hallazgos informados</strong><p>La auditoria no devolvio advertencias visibles.</p></div></div>',
+      '</article>',
+      '</section>',
+      '<section class="panel"><div class="section-title"><div><h2>Modelo operativo</h2><p>La definicion central se reutiliza; el estado y las credenciales no.</p></div></div><div class="openclaw-flow"><div><b>1</b><strong>Core release</strong><span>prompt + skills firmadas</span></div><i>→</i><div><b>2</b><strong>Policy compiler</strong><span>plan + tenant + aprobaciones</span></div><i>→</i><div><b>3</b><strong>Celda tenant</strong><span>sesiones y secretos aislados</span></div><i>→</i><div><b>4</b><strong>Canales</strong><span>WhatsApp, email, chat y voz</span></div></div></section>'
+    ].join("");
+  }
+
+  function openClawStat(label, value, meta, status) {
+    return '<article class="panel"><span>' + escapeHtml(label) + '</span><strong>' + escapeHtml(value) + '</strong><small>' + escapeHtml(meta) + '</small><i class="status-dot ' + escapeHtml(status) + '"></i></article>';
   }
 
   function renderPortfolioProjects() {
@@ -2290,6 +2369,12 @@
     var refreshPortfolioProjectsButton = event.target.closest("[data-refresh-portfolio-projects]");
     if (refreshPortfolioProjectsButton) {
       await loadPortfolioProjects(true);
+      return;
+    }
+
+    var refreshOpenClawButton = event.target.closest("[data-refresh-openclaw]");
+    if (refreshOpenClawButton) {
+      await loadOpenClawStatus(true);
       return;
     }
 

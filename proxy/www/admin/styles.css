@@ -1553,3 +1553,281 @@ tr:last-child td {
     grid-column: 1 / -1;
   }
 }
+
+.openclaw-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 16px;
+  padding: 30px;
+  color: #eefaf3;
+  border: 1px solid #294f3d;
+  border-radius: 20px;
+  background: radial-gradient(circle at 78% 0%, #2a6449 0, transparent 34%), linear-gradient(135deg, #10271d, #183d2d);
+}
+
+.openclaw-hero h2 {
+  margin: 6px 0 8px;
+  font-size: 34px;
+}
+
+.openclaw-hero p:not(.eyebrow) {
+  max-width: 680px;
+  margin: 0;
+  color: #afc7ba;
+}
+
+.openclaw-hero .eyebrow {
+  color: #b9ec68;
+}
+
+.openclaw-hero .btn:not(.primary) {
+  color: #e7f5ed;
+  border-color: #537565;
+  background: #ffffff0d;
+}
+
+.openclaw-notice {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 16px 18px;
+  border: 1px solid;
+  border-radius: 14px;
+}
+
+.openclaw-notice > span {
+  width: 24px;
+  height: 24px;
+}
+
+.openclaw-notice strong,
+.openclaw-notice p {
+  display: block;
+  margin: 0;
+}
+
+.openclaw-notice p {
+  margin-top: 3px;
+  font-size: 12px;
+}
+
+.openclaw-notice.success {
+  color: #286148;
+  border-color: #cce8d8;
+  background: #effaf4;
+}
+
+.openclaw-notice.danger {
+  color: #883e34;
+  border-color: #efc8c2;
+  background: #fff2f0;
+}
+
+.openclaw-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.openclaw-stat-grid article {
+  position: relative;
+  min-width: 0;
+}
+
+.openclaw-stat-grid span,
+.openclaw-stat-grid small,
+.openclaw-stat-grid strong {
+  display: block;
+}
+
+.openclaw-stat-grid span,
+.openclaw-stat-grid small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.openclaw-stat-grid strong {
+  margin: 8px 26px 5px 0;
+  overflow: hidden;
+  font-size: 20px;
+  text-overflow: ellipsis;
+}
+
+.openclaw-stat-grid small {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.status-dot {
+  position: absolute;
+  top: 22px;
+  right: 22px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #d98f83;
+}
+
+.status-dot.running {
+  background: #55bb7c;
+  box-shadow: 0 0 0 5px #55bb7c1d;
+}
+
+.openclaw-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.openclaw-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.openclaw-details div {
+  min-width: 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: #f7f9f8;
+}
+
+.openclaw-details dt {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.openclaw-details dd {
+  margin: 5px 0 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.openclaw-findings {
+  display: grid;
+  gap: 8px;
+}
+
+.openclaw-findings > div {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.openclaw-findings p,
+.openclaw-findings strong,
+.openclaw-findings small {
+  display: block;
+  margin: 0;
+}
+
+.openclaw-findings strong {
+  font-size: 11px;
+}
+
+.openclaw-findings small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.severity {
+  padding: 5px 7px;
+  text-align: center;
+  text-transform: uppercase;
+  border-radius: 99px;
+  font-size: 8px;
+  font-weight: 850;
+}
+
+.severity.critical {
+  color: #913d32;
+  background: #ffe9e6;
+}
+
+.severity.warn {
+  color: #856112;
+  background: #fff4d4;
+}
+
+.severity.info {
+  color: #35618a;
+  background: #e9f3ff;
+}
+
+.openclaw-flow {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+}
+
+.openclaw-flow > div {
+  display: grid;
+  gap: 5px;
+  min-height: 94px;
+  padding: 14px;
+  border-radius: 12px;
+  background: #f5f8f6;
+}
+
+.openclaw-flow b {
+  color: #7b9186;
+  font-size: 10px;
+}
+
+.openclaw-flow strong {
+  font-size: 12px;
+}
+
+.openclaw-flow span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.openclaw-flow > i {
+  color: #8ba096;
+  font-style: normal;
+}
+
+@media (max-width: 1050px) {
+  .openclaw-stat-grid,
+  .openclaw-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .openclaw-flow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .openclaw-flow > i {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .openclaw-hero {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 22px;
+  }
+
+  .openclaw-stat-grid,
+  .openclaw-columns,
+  .openclaw-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -409,6 +409,108 @@ print(json.dumps({
 }))
 """
 
+OPENCLAW_STATUS_SCRIPT = r"""
+import json
+import subprocess
+
+
+def run(command, timeout=30):
+    try:
+        completed = subprocess.run(command, text=True, capture_output=True, timeout=timeout)
+        return completed.returncode, completed.stdout.strip(), completed.stderr.strip()
+    except Exception as exc:
+        return 99, "", str(exc)
+
+
+def route_status():
+    code, stdout, stderr = run([
+        "curl", "-ksS", "-o", "/dev/null", "-w", "%{http_code}",
+        "https://sgdev.com.ar/admin-openclaw/",
+    ], timeout=15)
+    return int(stdout) if code == 0 and stdout.isdigit() else 0
+
+
+code, stdout, stderr = run(["docker", "ps", "-a", "--format", "{{.Names}}"], timeout=10)
+names = {line.strip() for line in stdout.splitlines() if line.strip()}
+container_name = next((name for name in ["sg-openclaw-gateway", "moltbot-clawdbot-1"] if name in names), "")
+
+if not container_name:
+    print(json.dumps({
+        "installed": False,
+        "routeStatus": route_status(),
+        "routeUrl": "https://sgdev.com.ar/admin-openclaw/",
+    }))
+    raise SystemExit(0)
+
+code, stdout, stderr = run(["docker", "inspect", container_name], timeout=15)
+if code != 0:
+    raise SystemExit(stderr or stdout or "docker inspect failed")
+
+container = json.loads(stdout)[0]
+config = container.get("Config") or {}
+state = container.get("State") or {}
+working_dir = config.get("WorkingDir") or "/app"
+
+
+def openclaw_command(*arguments):
+    return run([
+        "docker", "exec", "-w", working_dir, container_name,
+        "node", "dist/index.js", *arguments,
+    ], timeout=90)
+
+
+version_code, version_stdout, version_stderr = openclaw_command("--version")
+audit_code, audit_stdout, audit_stderr = openclaw_command("security", "audit", "--json")
+audit = {}
+if audit_stdout:
+    try:
+        audit = json.loads(audit_stdout[audit_stdout.find("{"):])
+    except Exception:
+        audit = {}
+
+findings = []
+for finding in audit.get("findings") or []:
+    findings.append({
+        "checkId": finding.get("checkId"),
+        "severity": finding.get("severity"),
+        "title": finding.get("title"),
+    })
+
+public_ports = []
+for target, bindings in ((container.get("NetworkSettings") or {}).get("Ports") or {}).items():
+    for binding in bindings or []:
+        host_ip = str(binding.get("HostIp") or "")
+        if host_ip not in {"127.0.0.1", "::1"}:
+            public_ports.append({
+                "target": target,
+                "hostIp": host_ip,
+                "hostPort": binding.get("HostPort"),
+            })
+
+networks = sorted(((container.get("NetworkSettings") or {}).get("Networks") or {}).keys())
+health = (state.get("Health") or {}).get("Status") or ("running" if state.get("Running") else state.get("Status"))
+version = (version_stdout or version_stderr).splitlines()[-1] if (version_stdout or version_stderr) else "unknown"
+
+print(json.dumps({
+    "installed": True,
+    "container": container_name,
+    "image": config.get("Image") or "",
+    "version": version,
+    "status": state.get("Status") or "unknown",
+    "health": health,
+    "user": config.get("User") or "image-default",
+    "restartCount": container.get("RestartCount") or 0,
+    "networks": networks,
+    "publicPorts": public_ports,
+    "routeStatus": route_status(),
+    "routeUrl": "https://sgdev.com.ar/admin-openclaw/",
+    "securitySummary": audit.get("summary") or {},
+    "securityFindings": findings,
+    "auditExitCode": audit_code,
+    "migrationRequired": container_name != "sg-openclaw-gateway",
+}))
+"""
+
 
 def load_env_file(path: Path) -> None:
     if not path.exists():
@@ -497,6 +599,14 @@ def remote_state() -> dict:
     code, stdout, stderr = target_exec(command, timeout=45)
     if code != 0:
         raise RuntimeError(stderr or stdout or f"remote state failed with exit {code}")
+    return json.loads(stdout)
+
+
+def openclaw_status() -> dict:
+    command = "python3 - <<'PY'\n" + OPENCLAW_STATUS_SCRIPT + "\nPY"
+    code, stdout, stderr = target_exec(command, timeout=120)
+    if code != 0:
+        raise RuntimeError(stderr or stdout or f"OpenClaw status failed with exit {code}")
     return json.loads(stdout)
 
 
@@ -975,6 +1085,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/portfolio/projects":
                 self.send_json(200, portfolio_projects())
+                return
+            if parsed.path == "/openclaw/status":
+                self.send_json(200, {"ok": True, **openclaw_status()})
                 return
             self.send_json(404, {"ok": False, "error": "not found"})
         except Exception as exc:
