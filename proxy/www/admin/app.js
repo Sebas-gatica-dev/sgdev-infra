@@ -48,6 +48,15 @@
     error: "",
     granting: false
   };
+  var portfolioProjectsState = {
+    loading: false,
+    saving: false,
+    items: [],
+    error: "",
+    maxImageBytes: 5242880,
+    editorOpen: false,
+    editingId: ""
+  };
 
   var icons = {
     dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 13h8V3H3v10zM13 21h8v-8h-8v8zM13 3v8h8V3h-8zM3 21h8v-6H3v6z"/></svg>',
@@ -77,6 +86,7 @@
   var navItems = [
     ["dashboard", "Tablero", icons.dashboard],
     ["apps", "Apps", icons.server],
+    ["projects", "Portfolio", icons.external],
     ["logs", "Logs", icons.logs],
     ["metrics", "Monitoreo", icons.chart],
     ["database", "Base de datos", icons.database],
@@ -574,7 +584,7 @@
     }, options || {}));
     var payload = await response.json().catch(function () { return {}; });
     if (!response.ok) {
-      throw new Error(payload.error || ("HTTP " + response.status));
+      throw new Error(payload.message || payload.error || ("HTTP " + response.status));
     }
     return payload;
   }
@@ -948,6 +958,137 @@
     }
   }
 
+  async function loadPortfolioProjects(force) {
+    if (portfolioProjectsState.loading) return;
+    if (!force && portfolioProjectsState.items.length && !portfolioProjectsState.error) return;
+    portfolioProjectsState.loading = true;
+    portfolioProjectsState.error = "";
+    render();
+    try {
+      var payload = await apiRequest("/portfolio/projects");
+      portfolioProjectsState.items = Array.isArray(payload.items) ? payload.items : [];
+      portfolioProjectsState.maxImageBytes = Number(payload.maxImageBytes || 5242880);
+    } catch (error) {
+      portfolioProjectsState.error = error.message || String(error);
+    } finally {
+      portfolioProjectsState.loading = false;
+      render();
+    }
+  }
+
+  async function savePortfolioProject(payload, coverFile, galleryFiles) {
+    portfolioProjectsState.saving = true;
+    portfolioProjectsState.error = "";
+    actionState = {
+      running: true,
+      action: "save-project",
+      slug: payload.slug,
+      status: "running",
+      message: "Guardando proyecto y archivos...",
+      updatedAt: nowStamp()
+    };
+    render();
+    try {
+      var result = await apiRequest("/portfolio/projects", {
+        method: "POST",
+        headers: authHeaders({ "Accept": "application/json", "Content-Type": "application/json" }),
+        body: JSON.stringify(payload)
+      });
+      var project = result.item;
+      if (!project || !project.id) throw new Error("El portfolio no devolvio el proyecto guardado.");
+
+      if (coverFile) {
+        await uploadPortfolioProjectImage(project.id, coverFile, "cover", "Portada de " + project.title, 0);
+      }
+      for (var i = 0; i < galleryFiles.length; i += 1) {
+        await uploadPortfolioProjectImage(project.id, galleryFiles[i], "gallery", "Captura de " + project.title, i + 1);
+      }
+
+      portfolioProjectsState.saving = false;
+      portfolioProjectsState.editorOpen = false;
+      portfolioProjectsState.editingId = "";
+      actionState = {
+        running: false,
+        action: "save-project",
+        slug: project.slug,
+        status: "ok",
+        message: "Proyecto guardado.",
+        updatedAt: nowStamp()
+      };
+      toast("Proyecto guardado en el portfolio");
+      await loadPortfolioProjects(true);
+    } catch (error) {
+      portfolioProjectsState.saving = false;
+      portfolioProjectsState.error = error.message || String(error);
+      actionState = {
+        running: false,
+        action: "save-project",
+        slug: payload.slug,
+        status: "error",
+        message: portfolioProjectsState.error,
+        updatedAt: nowStamp()
+      };
+      render();
+    }
+  }
+
+  async function uploadPortfolioProjectImage(projectId, file, kind, altText, sortOrder) {
+    if (file.size > portfolioProjectsState.maxImageBytes) {
+      throw new Error("La imagen " + file.name + " supera el maximo permitido.");
+    }
+    var dataBase64 = await fileDataUrl(file);
+    return apiRequest("/portfolio/projects/images", {
+      method: "POST",
+      headers: authHeaders({ "Accept": "application/json", "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        projectId: projectId,
+        image: {
+          fileName: file.name,
+          contentType: file.type,
+          dataBase64: dataBase64,
+          kind: kind,
+          altText: altText,
+          sortOrder: sortOrder
+        }
+      })
+    });
+  }
+
+  async function deletePortfolioProject(projectId) {
+    await apiRequest("/portfolio/projects/delete", {
+      method: "POST",
+      headers: authHeaders({ "Accept": "application/json", "Content-Type": "application/json" }),
+      body: JSON.stringify({ projectId: projectId })
+    });
+    toast("Proyecto eliminado");
+    await loadPortfolioProjects(true);
+  }
+
+  async function deletePortfolioProjectImage(projectId, imageId) {
+    await apiRequest("/portfolio/projects/images/delete", {
+      method: "POST",
+      headers: authHeaders({ "Accept": "application/json", "Content-Type": "application/json" }),
+      body: JSON.stringify({ projectId: projectId, imageId: imageId })
+    });
+    toast("Imagen eliminada");
+    await loadPortfolioProjects(true);
+  }
+
+  function fileDataUrl(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result || "")); };
+      reader.onerror = function () { reject(new Error("No pude leer " + file.name)); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function portfolioMediaUrl(image) {
+    var value = String((image && image.url) || "");
+    if (value.indexOf("/api/project-media/") === 0) return "/portfolio" + value;
+    return value;
+  }
+
   function filenameFromDisposition(value) {
     var match = String(value || "").match(/filename="?([^"]+)"?/i);
     return match ? match[1] : "";
@@ -1148,6 +1289,9 @@
     if (session && route === "tokens" && !portfolioUsageState.loading && !portfolioUsageState.items.length && !portfolioUsageState.error) {
       loadPortfolioUsage(false);
     }
+    if (session && route === "projects" && !portfolioProjectsState.loading && !portfolioProjectsState.items.length && !portfolioProjectsState.error) {
+      loadPortfolioProjects(false);
+    }
   }
 
   function renderLogin() {
@@ -1187,6 +1331,7 @@
     var renderers = {
       dashboard: renderDashboard,
       apps: renderApps,
+      projects: renderPortfolioProjects,
       logs: renderLogs,
       metrics: renderMetrics,
       database: renderDatabase,
@@ -1206,6 +1351,7 @@
       renderer(),
       "</main>",
       renderAppWizard(),
+      renderPortfolioProjectEditor(),
       "</div>"
     ].join("");
   }
@@ -1244,6 +1390,7 @@
     var title = {
       dashboard: ["Tablero", "Estado de VPS, apps y acciones frecuentes."],
       apps: ["Apps", "Inventario operativo de proyectos."],
+      projects: ["Portfolio", "Catalogo editorial de proyectos publicados y borradores."],
       logs: ["Logs", "Vista de comandos y salida esperada por servicio."],
       metrics: ["Monitoreo", "CPU, memoria, disco, procesos, red y Docker de la VPS."],
       database: ["Base de datos", "Export/import Excel por proyecto."],
@@ -1409,6 +1556,59 @@
       }).join("") + "</div>" : '<div class="monitor-empty"><span>' + icons.server + '</span><div><strong>No hay apps cargadas todavia.</strong><p>Sincroniza la VPS o crea una nueva app con el alta guiada.</p></div></div>',
       "</section>"
     ].join("");
+  }
+
+  function renderPortfolioProjects() {
+    var newButton = '<button class="btn primary" type="button" data-new-portfolio-project>' + icons.plus + " Nuevo proyecto</button>";
+    var body;
+    if (portfolioProjectsState.loading) {
+      body = '<div class="monitor-empty"><span>' + icons.refresh + '</span><div><strong>Cargando proyectos</strong><p>Consultando el backend del portfolio.</p></div></div>';
+    } else if (portfolioProjectsState.error) {
+      body = '<div class="form-alert error">' + escapeHtml(portfolioProjectsState.error) + '</div><div class="btn-row"><button class="btn" type="button" data-refresh-portfolio-projects>' + icons.refresh + ' Reintentar</button></div>';
+    } else if (!portfolioProjectsState.items.length) {
+      body = '<div class="monitor-empty"><span>' + icons.external + '</span><div><strong>No hay proyectos editoriales</strong><p>Crea el primer proyecto y publicalo cuando tenga contenido e imagenes.</p></div></div>';
+    } else {
+      body = '<div class="portfolio-project-grid">' + portfolioProjectsState.items.map(renderPortfolioProjectCard).join("") + "</div>";
+    }
+    return [
+      '<section class="panel">',
+      '<div class="section-title"><div><h2>Proyectos del portfolio</h2><p>Contenido editorial separado de las demos y vinculado opcionalmente a una app desplegada.</p></div><div class="btn-row"><button class="btn icon-only" type="button" title="Actualizar" data-refresh-portfolio-projects>' + icons.refresh + '</button>' + newButton + "</div></div>",
+      body,
+      "</section>"
+    ].join("");
+  }
+
+  function renderPortfolioProjectCard(project) {
+    var cover = (project.images || []).find(function (image) { return image.kind === "cover"; }) || (project.images || [])[0];
+    var statusClass = project.status === "published" ? "running" : project.status === "draft" ? "idle" : "stopped";
+    var liveUrl = project.liveUrl || "";
+    return [
+      '<article class="portfolio-editor-card">',
+      '<div class="portfolio-editor-cover">',
+      cover ? '<img src="' + escapeHtml(portfolioMediaUrl(cover)) + '" alt="' + escapeHtml(cover.altText || project.title) + '">' : '<span>' + icons.external + "</span>",
+      project.featured ? '<span class="portfolio-featured">Destacado</span>' : "",
+      "</div>",
+      '<div class="portfolio-editor-body">',
+      '<header><div class="card-title"><strong>' + escapeHtml(project.title) + '</strong><span>' + escapeHtml(project.slug) + '</span></div><span class="status-pill ' + statusClass + '"><span class="dot"></span>' + escapeHtml(portfolioProjectStatusLabel(project.status)) + "</span></header>",
+      '<p class="portfolio-editor-summary">' + escapeHtml(project.summary) + "</p>",
+      '<div class="tag-row">' + (project.techStack || []).map(function (tag) { return "<span>" + escapeHtml(tag) + "</span>"; }).join("") + "</div>",
+      '<div class="detail-grid compact"><div><span>App vinculada</span><strong>' + escapeHtml(project.infraAppSlug || "-") + '</strong></div><div><span>Imagenes</span><strong>' + escapeHtml((project.images || []).length) + '</strong></div></div>',
+      '<div class="btn-row portfolio-editor-actions"><button class="btn primary" type="button" data-edit-portfolio-project="' + escapeHtml(project.id) + '">Editar</button>',
+      liveUrl ? '<a class="btn" href="' + escapeHtml(liveUrl) + '" target="_blank" rel="noreferrer">' + icons.external + " Abrir</a>" : "",
+      '<button class="btn red" type="button" data-delete-portfolio-project="' + escapeHtml(project.id) + '">' + icons.trash + " Eliminar</button></div>",
+      "</div>",
+      "</article>"
+    ].join("");
+  }
+
+  function portfolioProjectStatusLabel(value) {
+    if (value === "published") return "Publicado";
+    if (value === "archived") return "Archivado";
+    return "Borrador";
+  }
+
+  function portfolioProjectById(id) {
+    return portfolioProjectsState.items.find(function (item) { return item.id === id; }) || null;
   }
 
   function renderLogs() {
@@ -1788,10 +1988,11 @@
       formField("Dominio", "domain", domain, { required: true, help: "Host publico que servira la ruta." }),
       "</div></section>",
       '<section class="wizard-section"><h3>Paso 2: Repositorio y Compose</h3><div class="form-grid">',
+      '<div class="field full"><label for="newAppPreset">Preparacion Docker</label><select class="select" id="newAppPreset" name="appPreset"><option value="existing-compose">Usar Compose del repositorio</option><option value="vite-static">Generar imagen Vite / React (npm)</option><option value="spring-boot">Generar imagen Spring Boot (Java 21)</option></select><span class="field-help">Las plantillas generan Dockerfile y Compose fuera del repo, dentro de /opt/apps/&lt;slug&gt;/generated.</span></div>',
       formField("URL del repo", "repoUrl", "", { required: true, full: true, placeholder: "https://github.com/owner/app.git" }),
       formField("Branch", "branch", "main", { required: true }),
       formField("Repo dir", "repoDir", appsRoot + "/" + slug + "/repo", { id: "newAppRepoDir", auto: true, required: true }),
-      formField("Compose files", "composeFiles", "compose.yml", { required: true, help: "Acepta uno o varios separados por espacio." }),
+      formField("Compose files", "composeFiles", "compose.yml", { id: "newAppComposeFiles", required: true, help: "Acepta uno o varios separados por espacio." }),
       formField("Env file", "envFile", ".env", { required: true }),
       checkboxField("Clonar repo al crear", "cloneRepo", true, "Si el directorio esta vacio, ejecuta git clone con el branch indicado."),
       "</div></section>",
@@ -1817,6 +2018,84 @@
     ].join("");
   }
 
+  function renderPortfolioProjectEditor() {
+    if (!portfolioProjectsState.editorOpen) return "";
+    var project = portfolioProjectById(portfolioProjectsState.editingId) || {
+      id: "",
+      title: "",
+      slug: "",
+      summary: "",
+      description: "",
+      liveUrl: "",
+      repositoryUrl: "",
+      infraAppSlug: "",
+      techStack: [],
+      status: "draft",
+      featured: false,
+      sortOrder: 0,
+      images: []
+    };
+    var error = portfolioProjectsState.error ? '<div class="form-alert error">' + escapeHtml(portfolioProjectsState.error) + "</div>" : "";
+    var appOptions = ['<option value="">Sin app vinculada</option>'].concat(state.apps.map(function (item) {
+      return '<option value="' + escapeHtml(item.slug) + '"' + (project.infraAppSlug === item.slug ? " selected" : "") + ">" + escapeHtml(item.name + " (" + item.slug + ")") + "</option>";
+    })).join("");
+    var images = (project.images || []).map(function (image) {
+      return [
+        '<article class="portfolio-image-item">',
+        '<img src="' + escapeHtml(portfolioMediaUrl(image)) + '" alt="' + escapeHtml(image.altText || project.title) + '">',
+        '<div><strong>' + escapeHtml(image.kind === "cover" ? "Portada" : "Galeria") + '</strong><span>' + escapeHtml(image.altText || image.storageKey) + '</span></div>',
+        '<button class="btn icon-only red" type="button" title="Eliminar imagen" data-delete-portfolio-image="' + escapeHtml(image.id) + '" data-project-id="' + escapeHtml(project.id) + '">' + icons.trash + "</button>",
+        "</article>"
+      ].join("");
+    }).join("");
+    var maxMb = Math.round(portfolioProjectsState.maxImageBytes / 1024 / 1024);
+
+    return [
+      '<div class="modal-backdrop" data-close-project-editor>',
+      '<form class="modal-panel project-editor-modal" id="portfolioProjectForm" data-stop-close>',
+      '<header class="modal-header"><div><p class="eyebrow">Portfolio CMS</p><h2>' + (project.id ? "Editar proyecto" : "Nuevo proyecto") + '<\/h2><p>Contenido publico separado de las demos y vinculado opcionalmente a una app de SgInfra.</p></div><button class="btn icon-only ghost" type="button" title="Cerrar" data-close-project-editor>' + icons.close + "</button></header>",
+      error,
+      '<input type="hidden" name="id" value="' + escapeHtml(project.id) + '">',
+      '<div class="project-editor-scroll">',
+      '<section class="wizard-section"><h3>Contenido</h3><div class="form-grid">',
+      projectFormField("Nombre", "title", project.title, { required: true, placeholder: "ArgentiCommerce" }),
+      projectFormField("Slug", "slug", project.slug, { required: true, placeholder: "argenticommerce" }),
+      projectFormField("Resumen para card", "summary", project.summary, { required: true, full: true, placeholder: "Descripcion breve del producto." }),
+      projectTextarea("Descripcion completa", "description", project.description, "Markdown permitido."),
+      projectFormField("Stack", "techStack", (project.techStack || []).join(", "), { full: true, placeholder: "Java, Spring Boot, Next.js, PostgreSQL" }),
+      "</div></section>",
+      '<section class="wizard-section"><h3>Publicacion y enlace</h3><div class="form-grid">',
+      '<div class="field"><label for="portfolioProjectStatus">Estado</label><select class="select" id="portfolioProjectStatus" name="status"><option value="draft"' + (project.status === "draft" ? " selected" : "") + '>Borrador</option><option value="published"' + (project.status === "published" ? " selected" : "") + '>Publicado</option><option value="archived"' + (project.status === "archived" ? " selected" : "") + '>Archivado</option></select></div>',
+      '<div class="field"><label for="portfolioProjectApp">App SgInfra</label><select class="select" id="portfolioProjectApp" name="infraAppSlug">' + appOptions + "</select></div>",
+      projectFormField("URL en produccion", "liveUrl", project.liveUrl, { full: true, placeholder: "/argenticommerce/ o https://..." }),
+      projectFormField("Repositorio", "repositoryUrl", project.repositoryUrl, { full: true, placeholder: "https://github.com/..." }),
+      projectFormField("Orden", "sortOrder", project.sortOrder, { type: "number" }),
+      '<label class="check-field"><input type="checkbox" name="featured"' + (project.featured ? " checked" : "") + '><span><strong>Proyecto destacado</strong><small>Aparece primero en el catalogo.</small></span></label>',
+      "</div></section>",
+      '<section class="wizard-section"><h3>Imagenes</h3><div class="form-grid">',
+      '<div class="field"><label for="portfolioProjectCover">Portada</label><input class="input" id="portfolioProjectCover" name="cover" type="file" accept="image/jpeg,image/png,image/webp"><span class="field-help">JPEG, PNG o WebP. Maximo ' + maxMb + " MiB.</span></div>",
+      '<div class="field"><label for="portfolioProjectGallery">Galeria</label><input class="input" id="portfolioProjectGallery" name="gallery" type="file" accept="image/jpeg,image/png,image/webp" multiple><span class="field-help">Podes agregar una o dos capturas.</span></div>',
+      "</div>",
+      images ? '<div class="portfolio-image-list">' + images + "</div>" : '<p class="meta">Todavia no hay imagenes cargadas.</p>',
+      "</section>",
+      "</div>",
+      '<footer class="modal-actions"><button class="btn" type="button" data-close-project-editor' + (portfolioProjectsState.saving ? " disabled" : "") + '>Cancelar</button><button class="btn primary" type="submit"' + (portfolioProjectsState.saving ? " disabled" : "") + ">" + icons.plus + (portfolioProjectsState.saving ? " Guardando..." : " Guardar proyecto") + "</button></footer>",
+      "</form>",
+      "</div>"
+    ].join("");
+  }
+
+  function projectFormField(label, name, value, options) {
+    options = options || {};
+    var id = "portfolioProject" + name.charAt(0).toUpperCase() + name.slice(1);
+    return '<div class="field' + (options.full ? " full" : "") + '"><label for="' + id + '">' + escapeHtml(label) + '</label><input class="input" id="' + id + '" name="' + escapeHtml(name) + '" type="' + (options.type || "text") + '" value="' + escapeHtml(value == null ? "" : value) + '"' + (options.placeholder ? ' placeholder="' + escapeHtml(options.placeholder) + '"' : "") + (options.required ? " required" : "") + "></div>";
+  }
+
+  function projectTextarea(label, name, value, help) {
+    var id = "portfolioProject" + name.charAt(0).toUpperCase() + name.slice(1);
+    return '<div class="field full"><label for="' + id + '">' + escapeHtml(label) + '</label><textarea class="input project-description-input" id="' + id + '" name="' + escapeHtml(name) + '">' + escapeHtml(value || "") + '</textarea><span class="field-help">' + escapeHtml(help || "") + "</span></div>";
+  }
+
   function slugify(value) {
     return String(value || "")
       .normalize("NFD")
@@ -1840,6 +2119,26 @@
       var input = document.getElementById(id);
       if (input && input.dataset.userEdited !== "true") input.value = values[id];
     });
+    updateNewAppPresetFields(slug);
+  }
+
+  function updateNewAppPresetFields(slug) {
+    slug = slugify(slug) || "miapp";
+    var presetInput = document.getElementById("newAppPreset");
+    var upstreamInput = document.getElementById("newAppUpstream");
+    var composeInput = document.getElementById("newAppComposeFiles");
+    var preset = presetInput ? presetInput.value : "existing-compose";
+    if (!upstreamInput || !composeInput) return;
+    if (preset === "vite-static") {
+      upstreamInput.value = "http://" + slug + "-web:80";
+      composeInput.value = (state.settings.appsRoot || "/opt/apps") + "/" + slug + "/generated/compose.yml";
+    } else if (preset === "spring-boot") {
+      upstreamInput.value = "http://" + slug + "-web:8080";
+      composeInput.value = (state.settings.appsRoot || "/opt/apps") + "/" + slug + "/generated/compose.yml";
+    } else {
+      upstreamInput.value = "http://" + slug + "-nginx:80";
+      composeInput.value = "compose.yml";
+    }
   }
 
   function collectCreateAppPayload(form) {
@@ -1850,6 +2149,7 @@
       name: String(data.get("name") || "").trim(),
       slug: slugify(data.get("slug")),
       appId: String(data.get("appId") || "").trim(),
+      appPreset: String(data.get("appPreset") || "existing-compose").trim(),
       repoUrl: String(data.get("repoUrl") || "").trim(),
       branch: String(data.get("branch") || "main").trim(),
       domain: String(data.get("domain") || "").trim(),
@@ -1947,11 +2247,76 @@
     }
 
     var closeWizardButton = event.target.closest("button[data-close-app-wizard]");
-    if (closeWizardButton || event.target.classList.contains("modal-backdrop")) {
+    var closeWizardBackdrop = event.target.classList.contains("modal-backdrop") && event.target.hasAttribute("data-close-app-wizard");
+    if (closeWizardButton || closeWizardBackdrop) {
       if (!appCreateState.running) {
         appCreateState.open = false;
         appCreateState.error = "";
         render();
+      }
+      return;
+    }
+
+    var newPortfolioProjectButton = event.target.closest("[data-new-portfolio-project]");
+    if (newPortfolioProjectButton) {
+      portfolioProjectsState.editorOpen = true;
+      portfolioProjectsState.editingId = "";
+      portfolioProjectsState.error = "";
+      render();
+      return;
+    }
+
+    var editPortfolioProjectButton = event.target.closest("[data-edit-portfolio-project]");
+    if (editPortfolioProjectButton) {
+      portfolioProjectsState.editorOpen = true;
+      portfolioProjectsState.editingId = editPortfolioProjectButton.getAttribute("data-edit-portfolio-project") || "";
+      portfolioProjectsState.error = "";
+      render();
+      return;
+    }
+
+    var closePortfolioProjectButton = event.target.closest("button[data-close-project-editor]");
+    var closePortfolioProjectBackdrop = event.target.classList.contains("modal-backdrop") && event.target.hasAttribute("data-close-project-editor");
+    if (closePortfolioProjectButton || closePortfolioProjectBackdrop) {
+      if (!portfolioProjectsState.saving) {
+        portfolioProjectsState.editorOpen = false;
+        portfolioProjectsState.editingId = "";
+        portfolioProjectsState.error = "";
+        render();
+      }
+      return;
+    }
+
+    var refreshPortfolioProjectsButton = event.target.closest("[data-refresh-portfolio-projects]");
+    if (refreshPortfolioProjectsButton) {
+      await loadPortfolioProjects(true);
+      return;
+    }
+
+    var deletePortfolioProjectButton = event.target.closest("[data-delete-portfolio-project]");
+    if (deletePortfolioProjectButton) {
+      var deleteProjectId = deletePortfolioProjectButton.getAttribute("data-delete-portfolio-project") || "";
+      var deleteProject = portfolioProjectById(deleteProjectId);
+      if (deleteProjectId && window.confirm("Eliminar el proyecto " + (deleteProject ? deleteProject.title : deleteProjectId) + " y todas sus imagenes?")) {
+        try {
+          await deletePortfolioProject(deleteProjectId);
+        } catch (error) {
+          toast("No pude eliminar el proyecto: " + (error.message || error));
+        }
+      }
+      return;
+    }
+
+    var deletePortfolioImageButton = event.target.closest("[data-delete-portfolio-image]");
+    if (deletePortfolioImageButton) {
+      var imageId = deletePortfolioImageButton.getAttribute("data-delete-portfolio-image") || "";
+      var imageProjectId = deletePortfolioImageButton.getAttribute("data-project-id") || "";
+      if (imageId && imageProjectId && window.confirm("Eliminar esta imagen del proyecto?")) {
+        try {
+          await deletePortfolioProjectImage(imageProjectId, imageId);
+        } catch (error) {
+          toast("No pude eliminar la imagen: " + (error.message || error));
+        }
       }
       return;
     }
@@ -2082,6 +2447,30 @@
       return;
     }
 
+    if (event.target.id === "portfolioProjectForm") {
+      event.preventDefault();
+      var projectForm = new FormData(event.target);
+      var coverInput = event.target.querySelector('[name="cover"]');
+      var galleryInput = event.target.querySelector('[name="gallery"]');
+      var coverFile = coverInput && coverInput.files && coverInput.files[0] ? coverInput.files[0] : null;
+      var galleryFiles = galleryInput && galleryInput.files ? Array.prototype.slice.call(galleryInput.files, 0, 2) : [];
+      savePortfolioProject({
+        id: String(projectForm.get("id") || "").trim(),
+        title: String(projectForm.get("title") || "").trim(),
+        slug: slugify(projectForm.get("slug")),
+        summary: String(projectForm.get("summary") || "").trim(),
+        description: String(projectForm.get("description") || "").trim(),
+        liveUrl: String(projectForm.get("liveUrl") || "").trim(),
+        repositoryUrl: String(projectForm.get("repositoryUrl") || "").trim(),
+        infraAppSlug: String(projectForm.get("infraAppSlug") || "").trim(),
+        techStack: String(projectForm.get("techStack") || "").split(",").map(function (value) { return value.trim(); }).filter(Boolean),
+        status: String(projectForm.get("status") || "draft"),
+        featured: projectForm.get("featured") === "on",
+        sortOrder: Number(projectForm.get("sortOrder") || 0)
+      }, coverFile, galleryFiles);
+      return;
+    }
+
     if (event.target.matches("[data-token-grant-form]")) {
       event.preventDefault();
       var tokenForm = new FormData(event.target);
@@ -2115,12 +2504,39 @@
       event.target.dataset.userEdited = "true";
       event.target.value = slugify(event.target.value);
       updateNewAppDerivedFields(event.target.value);
+      return;
+    }
+    if (event.target.id === "portfolioProjectTitle") {
+      var projectSlugInput = document.getElementById("portfolioProjectSlug");
+      if (projectSlugInput && projectSlugInput.dataset.userEdited !== "true") {
+        projectSlugInput.value = slugify(event.target.value);
+      }
+      return;
+    }
+    if (event.target.id === "portfolioProjectSlug") {
+      event.target.dataset.userEdited = "true";
+      event.target.value = slugify(event.target.value);
     }
   });
 
   app.addEventListener("change", async function (event) {
     if (event.target.id === "mobileNav") {
       navigate(event.target.value);
+      return;
+    }
+
+    if (event.target.id === "newAppPreset") {
+      var presetSlugInput = document.getElementById("newAppSlug");
+      updateNewAppPresetFields(presetSlugInput ? presetSlugInput.value : "miapp");
+      return;
+    }
+
+    if (event.target.id === "portfolioProjectApp") {
+      var linkedApp = appBySlug(event.target.value);
+      var projectLiveUrl = document.getElementById("portfolioProjectLiveUrl");
+      if (linkedApp && projectLiveUrl && !projectLiveUrl.value.trim()) {
+        projectLiveUrl.value = publicUrl(linkedApp);
+      }
       return;
     }
 

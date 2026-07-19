@@ -48,9 +48,45 @@ elif [[ "$no_pull" != "true" ]]; then
   git -C "$REPO_DIR" pull --ff-only origin "$BRANCH"
 fi
 
+compose_args="$(compose_base_args)"
+log "Validating Docker Compose configuration"
+# shellcheck disable=SC2086
+docker compose $compose_args config --quiet
+
+reject_public_ports="${REJECT_PUBLIC_PORTS:-false}"
+case "${reject_public_ports,,}" in
+  true|yes|1)
+    require_command python3
+    log "Checking that the app does not publish public host ports"
+    # shellcheck disable=SC2086
+    docker compose $compose_args config --format json | python3 -c '
+import json
+import sys
+
+config = json.load(sys.stdin)
+violations = []
+for service_name, service in (config.get("services") or {}).items():
+    for port in service.get("ports") or []:
+        published = port.get("published")
+        if published in (None, ""):
+            continue
+        host_ip = str(port.get("host_ip") or "")
+        if host_ip not in {"127.0.0.1", "::1"}:
+            violations.append("{}:{}->{}".format(service_name, published, port.get("target")))
+if violations:
+    print("Public host ports are forbidden; route traffic through sgdev-proxy: " + ", ".join(violations), file=sys.stderr)
+    raise SystemExit(1)
+'
+    ;;
+  false|no|0)
+    ;;
+  *)
+    die "REJECT_PUBLIC_PORTS must be true or false"
+    ;;
+esac
+
 docker network inspect "$PROXY_NETWORK" >/dev/null 2>&1 || docker network create "$PROXY_NETWORK"
 
-compose_args="$(compose_base_args)"
 log "Deploying $APP_SLUG with Docker Compose"
 # shellcheck disable=SC2086
 docker compose $compose_args up -d --build

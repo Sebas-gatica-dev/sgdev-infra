@@ -2,6 +2,7 @@
 import base64
 import json
 import os
+import posixpath
 import re
 import shlex
 import socket
@@ -11,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib import request as urllib_request
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 try:
     import paramiko
@@ -23,6 +24,16 @@ ROOT = Path(__file__).resolve().parent
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 SERVICE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
 DOMAIN_RE = re.compile(r"^[a-zA-Z0-9.-]+$")
+APP_PATH_RE = re.compile(r"^/[a-zA-Z0-9][a-zA-Z0-9/_-]*$")
+BRANCH_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,159}$")
+APP_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,119}$")
+DOCKER_HOST_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
+DOCKER_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
+SIZE_RE = re.compile(r"^[1-9][0-9]{0,5}[kKmMgG]$")
+TIMEOUT_RE = re.compile(r"^[1-9][0-9]{0,5}[smh]$")
+UUID_RE = re.compile(r"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[1-5][a-fA-F0-9]{3}-[89abAB][a-fA-F0-9]{3}-[a-fA-F0-9]{12}$")
+MAX_JSON_BODY_BYTES = 8 * 1024 * 1024
+RESERVED_APP_PATHS = ("/admin", "/admin-api", "/health", "/__deploy", "/.well-known")
 REMOTE_STATE_SCRIPT = r"""
 import glob
 import json
@@ -429,6 +440,7 @@ PORTFOLIO_USAGE_ADMIN_TOKEN = os.getenv(
     "SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN",
     os.getenv("PORTFOLIO_USAGE_ADMIN_TOKEN", ""),
 )
+PORTFOLIO_ADMIN_TOKEN = os.getenv("SGDEV_PORTFOLIO_ADMIN_TOKEN", PORTFOLIO_USAGE_ADMIN_TOKEN)
 
 
 def ssh_exec(command: str, timeout: int = 30) -> tuple[int, str, str]:
@@ -537,6 +549,117 @@ def safe_text(payload: dict, key: str, default: str = "", max_len: int = 500) ->
     return value
 
 
+def normalize_remote_path(value: str, field: str) -> str:
+    if not value.startswith("/") or "\x00" in value:
+        raise ValueError(f"{field} must be an absolute path")
+    normalized = posixpath.normpath(value)
+    if normalized == "/" or normalized != value.rstrip("/"):
+        raise ValueError(f"invalid {field}")
+    return normalized
+
+
+def ensure_path_within(path: str, parent: str, field: str) -> None:
+    if path != parent and not path.startswith(parent + "/"):
+        raise ValueError(f"{field} must stay inside {parent}")
+
+
+def validate_repo_url(value: str) -> None:
+    allowed_hosts = {
+        host.strip().lower()
+        for host in os.getenv("SGDEV_ALLOWED_GIT_HOSTS", "github.com,gitlab.com,bitbucket.org").split(",")
+        if host.strip()
+    }
+    ssh_match = re.fullmatch(r"git@([a-zA-Z0-9.-]+):([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+(?:\.git)?)", value)
+    if ssh_match:
+        if ssh_match.group(1).lower() not in allowed_hosts:
+            raise ValueError("repoUrl host is not allowed")
+        return
+    parsed = urlparse(value)
+    path_parts = [part for part in parsed.path.split("/") if part]
+    try:
+        repo_port = parsed.port
+    except ValueError as error:
+        raise ValueError("repoUrl has an invalid port") from error
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.hostname.lower() not in allowed_hosts
+        or parsed.username
+        or parsed.password
+        or repo_port not in (None, 443)
+        or parsed.query
+        or parsed.fragment
+        or len(path_parts) != 2
+        or not all(re.fullmatch(r"[a-zA-Z0-9_.-]+", part.removesuffix(".git")) for part in path_parts)
+    ):
+        raise ValueError("repoUrl must be an HTTPS or git SSH repository on an allowed host")
+
+
+def validate_domain(value: str) -> None:
+    labels = value.rstrip(".").split(".")
+    if (
+        not DOMAIN_RE.match(value)
+        or len(value) > 253
+        or len(labels) < 2
+        or any(not label or len(label) > 63 or label.startswith("-") or label.endswith("-") for label in labels)
+    ):
+        raise ValueError("invalid domain")
+
+
+def validate_app_path(value: str) -> None:
+    normalized = value.rstrip("/") or "/"
+    if value != normalized or not APP_PATH_RE.match(value) or "//" in value or "/../" in value:
+        raise ValueError("invalid public path")
+    if any(value == reserved or value.startswith(reserved + "/") for reserved in RESERVED_APP_PATHS):
+        raise ValueError("public path is reserved by SgInfra")
+
+
+def validate_upstream(value: str, slug: str) -> None:
+    parsed = urlparse(value)
+    hostname = parsed.hostname or ""
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise ValueError("invalid upstream port") from error
+    if (
+        parsed.scheme != "http"
+        or not hostname
+        or not DOCKER_HOST_RE.match(hostname)
+        or hostname.lower() in {"localhost", "host.docker.internal"}
+        or re.fullmatch(r"[0-9.]+", hostname)
+        or not (hostname == slug or hostname.startswith(slug + "-"))
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or (port is not None and not 1 <= port <= 65535)
+        or parsed.path not in ("", "/")
+    ):
+        raise ValueError(f"upstream must target an internal {slug}-* Docker service")
+
+
+def validate_relative_file(value: str, field: str) -> None:
+    if len(value) > 240 or value.startswith("/") or "//" in value:
+        raise ValueError(f"invalid {field}")
+    parts = value.split("/")
+    if any(
+        part in ("", ".", "..") or not re.fullmatch(r"\.?[a-zA-Z0-9][a-zA-Z0-9._-]*", part)
+        for part in parts
+    ):
+        raise ValueError(f"invalid {field}")
+
+
+def validate_compose_file(value: str) -> None:
+    if not value.startswith("/"):
+        validate_relative_file(value, "composeFiles")
+        return
+    normalized = normalize_remote_path(value, "composeFiles")
+    trusted_root = posixpath.normpath(f"{REMOTE_INFRA_ROOT}/examples/project-compose")
+    ensure_path_within(normalized, trusted_root, "composeFiles")
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*\.ya?ml", posixpath.basename(normalized)):
+        raise ValueError("invalid composeFiles")
+
+
 def remote_create_app(payload: dict) -> dict:
     slug = safe_text(payload, "slug", max_len=80)
     if not SLUG_RE.match(slug):
@@ -552,21 +675,94 @@ def remote_create_app(payload: dict) -> dict:
     app_root = safe_text(payload, "appRoot", app_root_default, max_len=260)
     branch = safe_text(payload, "branch", "main", max_len=160)
     app_id = safe_text(payload, "appId", f"app_{slug.replace('-', '_')}", max_len=120)
+    app_preset = safe_text(payload, "appPreset", "existing-compose", max_len=40)
     compose_files = safe_text(payload, "composeFiles", "compose.yml", max_len=400)
     env_file = safe_text(payload, "envFile", ".env", max_len=120)
 
     if not repo_url:
         raise ValueError("repoUrl is required")
-    if not domain or not DOMAIN_RE.match(domain):
-        raise ValueError("invalid domain")
-    if not app_path.startswith("/") or app_path == "/":
-        raise ValueError("path must start with / and cannot be /")
-    if not upstream.startswith(("http://", "https://")):
-        raise ValueError("upstream must start with http:// or https://")
-    if not repo_dir.startswith("/"):
-        raise ValueError("repoDir must be absolute")
+    validate_repo_url(repo_url)
+    validate_domain(domain)
+    validate_app_path(app_path)
+    apps_root = normalize_remote_path(os.getenv("SGDEV_APPS_ROOT", "/opt/apps"), "apps root")
+    expected_app_root = f"{apps_root}/{slug}"
+    repo_dir = normalize_remote_path(repo_dir, "repoDir")
+    app_root = normalize_remote_path(app_root, "appRoot")
+    if app_root != expected_app_root:
+        raise ValueError(f"appRoot must be {expected_app_root}")
+    ensure_path_within(repo_dir, app_root, "repoDir")
+    if app_preset == "vite-static":
+        compose_files = f"{app_root}/generated/compose.yml"
+        upstream = f"http://{slug}-web:80"
+    elif app_preset == "spring-boot":
+        compose_files = f"{app_root}/generated/compose.yml"
+        upstream = f"http://{slug}-web:8080"
+    elif app_preset != "existing-compose":
+        raise ValueError("unsupported appPreset")
+    validate_upstream(upstream, slug)
+    if not BRANCH_RE.match(branch) or ".." in branch or "//" in branch:
+        raise ValueError("invalid branch")
+    if not APP_ID_RE.match(app_id):
+        raise ValueError("invalid appId")
     if not compose_files:
         raise ValueError("composeFiles is required")
+    try:
+        compose_entries = shlex.split(compose_files)
+    except ValueError as error:
+        raise ValueError("invalid composeFiles") from error
+    if not 1 <= len(compose_entries) <= 5:
+        raise ValueError("composeFiles must contain between one and five files")
+    for compose_entry in compose_entries:
+        if app_preset == "existing-compose":
+            validate_compose_file(compose_entry)
+        elif compose_entry != f"{app_root}/generated/compose.yml":
+            raise ValueError("invalid generated compose path")
+    compose_files = " ".join(compose_entries)
+    validate_relative_file(env_file, "envFile")
+
+    client_max_body_size = safe_text(payload, "clientMaxBodySize", "25m", max_len=40)
+    proxy_connect_timeout = safe_text(payload, "proxyConnectTimeout", "10s", max_len=40)
+    proxy_read_timeout = safe_text(payload, "proxyReadTimeout", "120s", max_len=40)
+    proxy_send_timeout = safe_text(payload, "proxySendTimeout", "120s", max_len=40)
+    if not SIZE_RE.match(client_max_body_size):
+        raise ValueError("invalid clientMaxBodySize")
+    for key, value in {
+        "proxyConnectTimeout": proxy_connect_timeout,
+        "proxyReadTimeout": proxy_read_timeout,
+        "proxySendTimeout": proxy_send_timeout,
+    }.items():
+        if not TIMEOUT_RE.match(value):
+            raise ValueError(f"invalid {key}")
+
+    backup_volumes = safe_text(payload, "backupVolumes", max_len=400)
+    backup_paths = safe_text(payload, "backupPaths", max_len=400)
+    for volume in shlex.split(backup_volumes):
+        if not DOCKER_NAME_RE.match(volume):
+            raise ValueError("invalid backupVolumes")
+    for backup_path in shlex.split(backup_paths):
+        if backup_path.startswith("/"):
+            normalized_backup_path = normalize_remote_path(backup_path, "backupPaths")
+            ensure_path_within(normalized_backup_path, app_root, "backupPaths")
+        else:
+            validate_relative_file(backup_path, "backupPaths")
+
+    db_engine = safe_text(payload, "dbEngine", max_len=40).lower()
+    db_service = safe_text(payload, "dbService", max_len=80)
+    db_name = safe_text(payload, "dbName", max_len=120)
+    db_user = safe_text(payload, "dbUser", max_len=120)
+    db_app_id_column = safe_text(payload, "dbAppIdColumn", "app_id", max_len=80)
+    if db_engine and db_engine not in {"postgres", "postgresql", "mysql", "mariadb"}:
+        raise ValueError("unsupported dbEngine")
+    for key, value in {
+        "dbService": db_service,
+        "dbName": db_name,
+        "dbUser": db_user,
+        "dbAppIdColumn": db_app_id_column,
+    }.items():
+        if value and not re.fullmatch(r"[a-zA-Z0-9_][a-zA-Z0-9_.@$-]{0,119}", value):
+            raise ValueError(f"invalid {key}")
+    if db_engine and not all((db_service, db_name, db_user)):
+        raise ValueError("dbService, dbName and dbUser are required with dbEngine")
 
     env_values = {
         "APP_NAME": name,
@@ -575,21 +771,23 @@ def remote_create_app(payload: dict) -> dict:
         "APP_ROOT": app_root,
         "GIT_REMOTE_URL": repo_url,
         "BRANCH": branch,
+        "APP_PRESET": app_preset,
         "COMPOSE_FILES": compose_files,
         "ENV_FILE": env_file,
         "STRIP_PREFIX": "true" if payload.get("stripPrefix", True) else "false",
         "APP_NEW_CLONE": "true" if payload.get("cloneRepo", True) else "false",
-        "CLIENT_MAX_BODY_SIZE": safe_text(payload, "clientMaxBodySize", "25m", max_len=40),
-        "PROXY_CONNECT_TIMEOUT": safe_text(payload, "proxyConnectTimeout", "10s", max_len=40),
-        "PROXY_READ_TIMEOUT": safe_text(payload, "proxyReadTimeout", "120s", max_len=40),
-        "PROXY_SEND_TIMEOUT": safe_text(payload, "proxySendTimeout", "120s", max_len=40),
-        "BACKUP_VOLUMES": safe_text(payload, "backupVolumes", max_len=400),
-        "BACKUP_PATHS": safe_text(payload, "backupPaths", max_len=400),
-        "DB_EXCEL_ENGINE": safe_text(payload, "dbEngine", max_len=40),
-        "DB_EXCEL_SERVICE": safe_text(payload, "dbService", max_len=80),
-        "DB_EXCEL_DATABASE": safe_text(payload, "dbName", max_len=120),
-        "DB_EXCEL_USER": safe_text(payload, "dbUser", max_len=120),
-        "DB_EXCEL_APP_ID_COLUMN": safe_text(payload, "dbAppIdColumn", "app_id", max_len=80),
+        "CLIENT_MAX_BODY_SIZE": client_max_body_size,
+        "PROXY_CONNECT_TIMEOUT": proxy_connect_timeout,
+        "PROXY_READ_TIMEOUT": proxy_read_timeout,
+        "PROXY_SEND_TIMEOUT": proxy_send_timeout,
+        "REJECT_PUBLIC_PORTS": "true",
+        "BACKUP_VOLUMES": backup_volumes,
+        "BACKUP_PATHS": backup_paths,
+        "DB_EXCEL_ENGINE": db_engine,
+        "DB_EXCEL_SERVICE": db_service,
+        "DB_EXCEL_DATABASE": db_name,
+        "DB_EXCEL_USER": db_user,
+        "DB_EXCEL_APP_ID_COLUMN": db_app_id_column,
     }
     if not any(env_values[key] for key in ["DB_EXCEL_ENGINE", "DB_EXCEL_SERVICE", "DB_EXCEL_DATABASE", "DB_EXCEL_USER"]):
         env_values["DB_EXCEL_APP_ID_COLUMN"] = ""
@@ -637,9 +835,9 @@ def portfolio_api_request(method: str, path: str, payload=None) -> dict:
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
-    if PORTFOLIO_USAGE_ADMIN_TOKEN:
-        headers["Authorization"] = f"Bearer {PORTFOLIO_USAGE_ADMIN_TOKEN}"
-        headers["X-Sgdev-Portfolio-Admin-Token"] = PORTFOLIO_USAGE_ADMIN_TOKEN
+    if PORTFOLIO_ADMIN_TOKEN:
+        headers["Authorization"] = f"Bearer {PORTFOLIO_ADMIN_TOKEN}"
+        headers["X-Sgdev-Portfolio-Admin-Token"] = PORTFOLIO_ADMIN_TOKEN
 
     request = urllib_request.Request(url, data=body, headers=headers, method=method)
     try:
@@ -663,6 +861,43 @@ def portfolio_usage() -> dict:
 
 def portfolio_grant_tokens(payload: dict) -> dict:
     return portfolio_api_request("POST", "/admin/usage/grant", payload)
+
+
+def require_uuid(payload: dict, key: str) -> str:
+    value = safe_text(payload, key, max_len=36)
+    if not UUID_RE.match(value):
+        raise ValueError(f"invalid {key}")
+    return value
+
+
+def portfolio_projects() -> dict:
+    return portfolio_api_request("GET", "/admin/projects")
+
+
+def portfolio_save_project(payload: dict) -> dict:
+    return portfolio_api_request("POST", "/admin/projects", payload)
+
+
+def portfolio_delete_project(payload: dict) -> dict:
+    project_id = require_uuid(payload, "projectId")
+    return portfolio_api_request("DELETE", f"/admin/projects/{quote(project_id)}")
+
+
+def portfolio_upload_project_image(payload: dict) -> dict:
+    project_id = require_uuid(payload, "projectId")
+    image_payload = payload.get("image")
+    if not isinstance(image_payload, dict):
+        raise ValueError("image is required")
+    return portfolio_api_request("POST", f"/admin/projects/{quote(project_id)}/images", image_payload)
+
+
+def portfolio_delete_project_image(payload: dict) -> dict:
+    project_id = require_uuid(payload, "projectId")
+    image_id = require_uuid(payload, "imageId")
+    return portfolio_api_request(
+        "DELETE",
+        f"/admin/projects/{quote(project_id)}/images/{quote(image_id)}",
+    )
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -738,6 +973,9 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/portfolio/usage":
                 self.send_json(200, portfolio_usage())
                 return
+            if parsed.path == "/portfolio/projects":
+                self.send_json(200, portfolio_projects())
+                return
             self.send_json(404, {"ok": False, "error": "not found"})
         except Exception as exc:
             self.send_json(500, {"ok": False, "error": str(exc)})
@@ -748,6 +986,9 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         try:
             length = int(self.headers.get("Content-Length", "0"))
+            if length > MAX_JSON_BODY_BYTES:
+                self.send_json(413, {"ok": False, "error": "request body too large"})
+                return
             body = self.rfile.read(length) if length else b"{}"
             payload = json.loads(body.decode("utf-8"))
             if parsed.path == "/actions":
@@ -764,6 +1005,18 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/portfolio/usage/grant":
                 self.send_json(200, portfolio_grant_tokens(payload))
+                return
+            if parsed.path == "/portfolio/projects":
+                self.send_json(200, portfolio_save_project(payload))
+                return
+            if parsed.path == "/portfolio/projects/delete":
+                self.send_json(200, portfolio_delete_project(payload))
+                return
+            if parsed.path == "/portfolio/projects/images":
+                self.send_json(200, portfolio_upload_project_image(payload))
+                return
+            if parsed.path == "/portfolio/projects/images/delete":
+                self.send_json(200, portfolio_delete_project_image(payload))
                 return
             self.send_json(404, {"ok": False, "error": "not found"})
         except Exception as exc:

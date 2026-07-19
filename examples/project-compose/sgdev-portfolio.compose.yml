@@ -88,6 +88,9 @@ services:
       PORTFOLIO_FREE_MODEL_NAME: ${PORTFOLIO_FREE_MODEL_NAME:-qwen3:0.6b}
       PORTFOLIO_APPOINTMENT_DEMO_CLEANUP_RETENTION_DAYS: ${PORTFOLIO_APPOINTMENT_DEMO_CLEANUP_RETENTION_DAYS:-2}
       PORTFOLIO_USAGE_ADMIN_TOKEN: ${PORTFOLIO_USAGE_ADMIN_TOKEN:-}
+      PORTFOLIO_ADMIN_TOKEN: ${PORTFOLIO_ADMIN_TOKEN:-${PORTFOLIO_USAGE_ADMIN_TOKEN:-}}
+      PORTFOLIO_PROJECT_MEDIA_DIR: /app/data/project-media
+      PORTFOLIO_PROJECT_MAX_IMAGE_BYTES: ${PORTFOLIO_PROJECT_MAX_IMAGE_BYTES:-5242880}
     depends_on:
       db:
         condition: service_healthy
@@ -95,6 +98,8 @@ services:
         condition: service_started
     expose:
       - "8787"
+    volumes:
+      - portfolio_project_media:/app/data/project-media
 
   frontend:
     build:
@@ -125,6 +130,7 @@ services:
 volumes:
   portfolio_postgres_data:
   portfolio_ollama_data:
+  portfolio_project_media:
 
 networks:
   proxy:

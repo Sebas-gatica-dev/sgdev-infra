@@ -82,7 +82,9 @@ compose_base_args() {
     args+=(--env-file "$env_file_abs")
   fi
   local compose_file compose_file_abs
-  for compose_file in $COMPOSE_FILES; do
+  local -a compose_files_array
+  read -r -a compose_files_array <<< "$COMPOSE_FILES"
+  for compose_file in "${compose_files_array[@]}"; do
     compose_file_abs="$(abs_path "$REPO_DIR" "$compose_file")"
     [[ -f "$compose_file_abs" ]] || die "Compose file not found: $compose_file_abs"
     args+=(-f "$compose_file_abs")

@@ -18,7 +18,8 @@ Optional environment:
   COMPOSE_FILES, STRIP_PREFIX, CLIENT_MAX_BODY_SIZE, PROXY_*_TIMEOUT
   BACKUP_DIR, BACKUP_COMMAND, BACKUP_VOLUMES, BACKUP_PATHS
   DB_EXCEL_ENGINE, DB_EXCEL_SERVICE, DB_EXCEL_DATABASE, DB_EXCEL_USER
-  DB_EXCEL_APP_ID_COLUMN, APP_NEW_CLONE=true
+  DB_EXCEL_APP_ID_COLUMN, APP_NEW_CLONE=true, REJECT_PUBLIC_PORTS=true
+  APP_PRESET=existing-compose|vite-static|spring-boot
 USAGE
 }
 
@@ -43,10 +44,72 @@ proxy_connect_timeout="${PROXY_CONNECT_TIMEOUT:-10s}"
 proxy_read_timeout="${PROXY_READ_TIMEOUT:-120s}"
 proxy_send_timeout="${PROXY_SEND_TIMEOUT:-120s}"
 backup_dir="${BACKUP_DIR:-$SGDEV_BACKUPS_ROOT/$slug}"
+reject_public_ports="${REJECT_PUBLIC_PORTS:-true}"
+app_preset="${APP_PRESET:-existing-compose}"
 
 ensure_slug "$slug"
-[[ "$app_path" == /* ]] || die "app-path must start with /"
-[[ "$app_path" != "/" ]] || die "app-path cannot be / for a multiproject proxy"
+[[ "$app_path" =~ ^/[a-zA-Z0-9][a-zA-Z0-9/_-]*$ ]] || die "Invalid app-path: $app_path"
+[[ "$app_path" != *"//"* && "$app_path" != */ ]] || die "Invalid app-path: $app_path"
+for reserved_path in /admin /admin-api /health /__deploy /.well-known; do
+  [[ "$app_path" != "$reserved_path" && "$app_path" != "$reserved_path"/* ]] || die "Reserved app-path: $app_path"
+done
+
+expected_app_root="$(realpath -m "$SGDEV_APPS_ROOT/$slug")"
+app_root="$(realpath -m "$app_root")"
+repo_dir="$(realpath -m "$repo_dir")"
+[[ "$app_root" == "$expected_app_root" ]] || die "APP_ROOT must be $expected_app_root"
+[[ "$repo_dir" == "$app_root"/* ]] || die "repo-dir must stay inside $app_root"
+case "$app_preset" in
+  existing-compose)
+    ;;
+  vite-static)
+    compose_files="$app_root/generated/compose.yml"
+    upstream="http://$slug-web:80"
+    ;;
+  spring-boot)
+    compose_files="$app_root/generated/compose.yml"
+    upstream="http://$slug-web:8080"
+    ;;
+  *)
+    die "Unsupported APP_PRESET: $app_preset"
+    ;;
+esac
+[[ "$branch" =~ ^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,159}$ ]] || die "Invalid branch: $branch"
+[[ "$branch" != *".."* && "$branch" != *"//"* ]] || die "Invalid branch: $branch"
+[[ "$upstream" =~ ^http://$slug(-[a-zA-Z0-9_.-]+)?(:[0-9]{1,5})?/?$ ]] || die "Upstream must target an internal $slug-* Docker service"
+[[ "$env_file" =~ ^\.?[a-zA-Z0-9][a-zA-Z0-9._/-]*$ && "$env_file" != *".."* && "$env_file" != /* ]] || die "Invalid env-file: $env_file"
+[[ "$app_id" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,119}$ ]] || die "Invalid APP_ID: $app_id"
+if [[ -n "$app_domain" ]]; then
+  [[ "$app_domain" =~ ^[a-zA-Z0-9.-]+$ && "$app_domain" == *.* && "$app_domain" != *".."* ]] || die "Invalid APP_DOMAIN: $app_domain"
+fi
+if [[ -n "$git_remote_url" ]]; then
+  if [[ "$git_remote_url" =~ ^https://([a-zA-Z0-9.-]+)/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+(\.git)?$ ]]; then
+    git_host="${BASH_REMATCH[1]}"
+  elif [[ "$git_remote_url" =~ ^git@([a-zA-Z0-9.-]+):[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+(\.git)?$ ]]; then
+    git_host="${BASH_REMATCH[1]}"
+  else
+    die "GIT_REMOTE_URL must be an HTTPS or git SSH repository"
+  fi
+  allowed_git_hosts=",${SGDEV_ALLOWED_GIT_HOSTS:-github.com,gitlab.com,bitbucket.org},"
+  [[ "$allowed_git_hosts" == *",$git_host,"* ]] || die "Git host is not allowed: $git_host"
+fi
+read -r -a compose_entries <<< "$compose_files"
+[[ ${#compose_entries[@]} -ge 1 && ${#compose_entries[@]} -le 5 ]] || die "Configure between one and five compose files"
+for current_compose_file in "${compose_entries[@]}"; do
+  if [[ "$app_preset" == "existing-compose" ]]; then
+    if [[ "$current_compose_file" == /* ]]; then
+      trusted_compose_root="$(realpath -m "$SGDEV_INFRA_ROOT/examples/project-compose")"
+      current_compose_file="$(realpath -m "$current_compose_file")"
+      [[ "$current_compose_file" == "$trusted_compose_root"/* ]] || die "Absolute compose files must stay inside $trusted_compose_root"
+      [[ "${current_compose_file##*/}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*\.ya?ml$ ]] || die "Invalid compose file: $current_compose_file"
+    else
+      [[ "$current_compose_file" =~ ^[a-zA-Z0-9][a-zA-Z0-9._/-]*$ ]] || die "Invalid compose file: $current_compose_file"
+      [[ "$current_compose_file" != *".."* ]] || die "Invalid compose file: $current_compose_file"
+    fi
+  else
+    [[ "$current_compose_file" == "$app_root/generated/compose.yml" ]] || die "Invalid generated compose path"
+  fi
+done
 
 write_env_var() {
   local key="$1"
@@ -80,6 +143,10 @@ else
   mkdir -p "$repo_dir"
 fi
 
+if [[ "$app_preset" != "existing-compose" ]]; then
+  "$SCRIPT_DIR/app-scaffold.sh" "$slug" "$repo_dir" "$app_preset"
+fi
+
 {
   write_env_var APP_SLUG "$slug"
   write_env_var APP_NAME "$app_name"
@@ -90,6 +157,7 @@ fi
   write_env_var APP_ROOT "$app_root"
   write_env_var REPO_DIR "$repo_dir"
   write_env_var GIT_REMOTE_URL "$git_remote_url"
+  write_env_var APP_PRESET "$app_preset"
   if [[ -n "${COMPOSE_FILES:-}" || "$compose_file" =~ [[:space:]] ]]; then
     write_env_var COMPOSE_FILES "$compose_files"
   else
@@ -102,6 +170,7 @@ fi
   write_env_var PROXY_CONNECT_TIMEOUT "$proxy_connect_timeout"
   write_env_var PROXY_READ_TIMEOUT "$proxy_read_timeout"
   write_env_var PROXY_SEND_TIMEOUT "$proxy_send_timeout"
+  write_env_var REJECT_PUBLIC_PORTS "$reject_public_ports"
   write_env_var BACKUP_DIR "$backup_dir"
   write_env_var BACKUP_COMMAND "${BACKUP_COMMAND:-}"
   write_env_var BACKUP_VOLUMES "${BACKUP_VOLUMES:-}"

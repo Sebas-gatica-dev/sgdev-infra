@@ -95,6 +95,7 @@ SGDEV_INFRA_ROOT=$SGDEV_INFRA_ROOT
 SGDEV_APPS_CONFIG_DIR=$SGDEV_APPS_CONFIG_DIR
 SGDEV_PORTFOLIO_API_BASE_URL=https://${SGDEV_PRIMARY_DOMAIN:-sgdev.com.ar}/portfolio/api
 SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN=$token
+SGDEV_PORTFOLIO_ADMIN_TOKEN=$token
 EOF
   log "Created $control_env_file"
 else
@@ -105,11 +106,20 @@ set_env_value "$control_env_file" "SGDEV_PORTFOLIO_API_BASE_URL" "https://${SGDE
 if ! grep -q '^SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN=' "$control_env_file" 2>/dev/null; then
   set_env_value "$control_env_file" "SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN" "$token"
 fi
+if ! grep -q '^SGDEV_PORTFOLIO_ADMIN_TOKEN=' "$control_env_file" 2>/dev/null; then
+  set_env_value "$control_env_file" "SGDEV_PORTFOLIO_ADMIN_TOKEN" "$token"
+fi
 portfolio_usage_token="$(grep -E '^SGDEV_PORTFOLIO_USAGE_ADMIN_TOKEN=' "$control_env_file" | tail -n 1 | cut -d= -f2- || true)"
+portfolio_admin_token="$(grep -E '^SGDEV_PORTFOLIO_ADMIN_TOKEN=' "$control_env_file" | tail -n 1 | cut -d= -f2- || true)"
 if [[ -f "$portfolio_app_env_file" && -n "$portfolio_usage_token" ]] \
   && ! grep -q '^PORTFOLIO_USAGE_ADMIN_TOKEN=' "$portfolio_app_env_file" 2>/dev/null; then
   set_env_value "$portfolio_app_env_file" "PORTFOLIO_USAGE_ADMIN_TOKEN" "$portfolio_usage_token"
   log "Added PORTFOLIO_USAGE_ADMIN_TOKEN to $portfolio_app_env_file"
+fi
+if [[ -f "$portfolio_app_env_file" && -n "$portfolio_admin_token" ]] \
+  && ! grep -q '^PORTFOLIO_ADMIN_TOKEN=' "$portfolio_app_env_file" 2>/dev/null; then
+  set_env_value "$portfolio_app_env_file" "PORTFOLIO_ADMIN_TOKEN" "$portfolio_admin_token"
+  log "Added PORTFOLIO_ADMIN_TOKEN to $portfolio_app_env_file"
 fi
 
 chown "$service_user":"$service_user" "$control_env_file" || true
