@@ -1,12 +1,25 @@
 name: Deploy app
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - examples/apps/soff-portfolio.env.example
   workflow_dispatch:
     inputs:
       slug:
-        description: App slug configured in /etc/sgdev-infra/apps/<slug>.env
+        description: App slug (portfolio, argenticommerce, soff-portfolio, infra or admin)
         required: true
         default: portfolio
+      provision_from_example:
+        description: Register a missing app from examples/apps/<slug>.env.example
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
       no_pull:
         description: Deploy without git pull
         required: true
@@ -37,8 +50,9 @@ jobs:
           SSH_HOST: ${{ secrets.SGDEV_VPS_HOST }}
           SSH_PORT: ${{ secrets.SGDEV_SSH_PORT || '22022' }}
           SSH_USER: ${{ secrets.SGDEV_SSH_USER || 'root' }}
-          SLUG: ${{ inputs.slug }}
-          NO_PULL: ${{ inputs.no_pull }}
+          SLUG: ${{ github.event_name == 'push' && 'soff-portfolio' || inputs.slug }}
+          PROVISION_FROM_EXAMPLE: ${{ github.event_name == 'push' && 'true' || inputs.provision_from_example }}
+          NO_PULL: ${{ github.event_name == 'push' && 'false' || inputs.no_pull }}
         run: |
           set -Eeuo pipefail
 
@@ -50,11 +64,12 @@ jobs:
             -o ServerAliveCountMax=6 \
             -o TCPKeepAlive=yes \
             -o ConnectTimeout=20 \
-            "$SSH_USER@$SSH_HOST" bash -s -- "$SLUG" "$NO_PULL" <<'REMOTE_SCRIPT'
+            "$SSH_USER@$SSH_HOST" bash -s -- "$SLUG" "$NO_PULL" "$PROVISION_FROM_EXAMPLE" <<'REMOTE_SCRIPT'
           set -Eeuo pipefail
 
           slug="$1"
           no_pull="${2:-false}"
+          provision_from_example="${3:-false}"
 
           trap 'rc=$?; printf "[deploy] ERROR line %s while running: %s\n" "$LINENO" "$BASH_COMMAND" >&2; exit "$rc"' ERR
 
@@ -89,6 +104,18 @@ jobs:
           run ./scripts/proxy-up.sh
           run ./scripts/sync-ssl-conf.sh
           run ./scripts/proxy-reload.sh </dev/null
+
+          case "$slug" in
+            infra|admin)
+              log "Infrastructure, admin APIs and proxy updated successfully"
+              exit 0
+              ;;
+          esac
+
+          app_config="/etc/sgdev-infra/apps/$slug.env"
+          if [ ! -f "$app_config" ] && [ "$provision_from_example" = "true" ]; then
+            run ./scripts/app-register-example.sh "$slug"
+          fi
 
           deploy_args=("$slug")
           if [ "$no_pull" = "true" ]; then

@@ -113,3 +113,28 @@ cd /opt/sgdev-infra
 ```
 
 Ese comando ya hace `git pull`, build, up y reload de Nginx.
+
+## Workflow manual `Deploy app`
+
+En GitHub Actions, `Use workflow from` elige la rama de SgInfra que contiene el
+workflow. Para operar aplicaciones se usa el campo `slug`:
+
+| Objetivo | `slug` | `provision_from_example` |
+| --- | --- | --- |
+| Portfolio principal | `portfolio` | `false` |
+| ArgentiCommerce | `argenticommerce` | `false` |
+| Portfolio de Soff, primera vez | `soff-portfolio` | `true` |
+| Portfolio de Soff, actualizaciones | `soff-portfolio` | `false` |
+| Solo infraestructura, admin y proxy | `infra` o `admin` | `false` |
+
+`provision_from_example=true` solo actua cuando todavía no existe
+`/etc/sgdev-infra/apps/<slug>.env`. El alta se toma de un manifiesto versionado
+en `examples/apps/<slug>.env.example`; no reemplaza configuraciones existentes.
+
+`no_pull=true` reconstruye la revisión que ya está en la VPS. Para traer el
+último commit de la aplicación se debe dejar en `false`.
+
+El manifiesto `examples/apps/soff-portfolio.env.example` también dispara el
+workflow al cambiar en `main`. Esto permite que su primera incorporación se
+registre y despliegue automáticamente; los cambios normales del código de la
+aplicación se siguen desplegando manualmente con `slug=soff-portfolio`.
